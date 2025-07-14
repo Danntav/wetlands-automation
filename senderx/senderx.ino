@@ -3,15 +3,19 @@
 #include <driver/rtc_io.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
+#include <ADS1115_WE.h>
+#include <Wire.h>
 
 #define uS_TO_S_FACTOR 1000000ULL
 //#define TIME_TO_SLEEP  30*60
-#define TIME_TO_SLEEP  3000
+#define TIME_TO_SLEEP  300
 #define ACK_TIMEOUT_MS 2000
 
 #define BUTTON_PIN_BITMASK(GPIO) (1ULL << GPIO)  // 2 ^ GPIO_NUMBER in hex
 #define USE_EXT0_WAKEUP          0               // 1 = EXT0 wakeup, 0 = EXT1 wakeup
 #define WAKEUP_GPIO              GPIO_NUM_33     // Only RTC IO are allowed - ESP32 Pin example
+
+#define I2C_ADDRESS 0x48  // ADS1115
 
 #define NODE_ID 1
 
@@ -30,24 +34,19 @@ typedef struct {
   bool ok;
 } ack_message;
 
-// Create a struct_message called myData
-struct_message myData;
-
-// Create peer interface
-esp_now_peer_info_t peerInfo;
-
-namespace US{
+namespace US {
   const int trig = 26;
   const int echo = 27;
-  const long limit = 20; // nível crítico em cm
+  const int limit = 20; // limit level in cm
 }
 
-namespace TMP{
-  const int one_wire = 23;
+namespace TMP {
+  const int tmp_pin = 23;
+  bool tmp_found = false;
 }
 
-namespace LED{
-  const int white = 25;
+namespace LED {
+  const int yellow = 25;
   const int red = 18;
   const int green = 19;
 }
@@ -56,15 +55,28 @@ RTC_DATA_ATTR int bootCount = 0;
 
 volatile bool ackReceived = false;
 
+// Create a struct_message called myData
+struct_message myData;
+
+// Create peer interface
+esp_now_peer_info_t peerInfo;
+
+// Create temp sensor object and temporary address
+OneWire oneWire(TMP::tmp_pin);
+DallasTemperature tmp_sensor(&oneWire);
+DeviceAddress tmp_add;
+
+// Create ADC object
+ADS1115_WE adc(I2C_ADDRESS);
+
+
 void setup() {
   // Init Serial Monitor
   Serial.begin(115200);
-
-  pinMode(LED::white, OUTPUT);
+   
+  pinMode(LED::yellow, OUTPUT);
   pinMode(LED::red, OUTPUT);
   pinMode(LED::green, OUTPUT);
-
-  ledUSLimit();
 
   ++bootCount;
   Serial.println("Boot number: " + String(bootCount));
@@ -76,22 +88,33 @@ void setup() {
 
   if (wakeup_reason == ESP_SLEEP_WAKEUP_EXT0){
     levelUS();
-  }
-  else if (ESP_SLEEP_WAKEUP_TIMER){
+  } else if (wakeup_reason == ESP_SLEEP_WAKEUP_TIMER){
+    initSensors();
     measureSensors();
     sendPayloadAndWaitAck();
+  } else {
+    Serial.println("First Boot");
   }
-
-  else{
-    Serial.print("First Boot");
-  }
+  ledTurnOff();
   
   esp_deep_sleep_start();
 }
 
 
-void loop() {
-  // EMPTY
+void loop() { } // EMPTY
+
+
+void configureWakeups() {
+  // Configure wakeup via button (EXT0)
+  esp_sleep_enable_ext0_wakeup(WAKEUP_GPIO, 1);
+  rtc_gpio_pullup_dis(WAKEUP_GPIO);
+  rtc_gpio_pulldown_en(WAKEUP_GPIO);
+
+  // Configure wakeup source every "TIME_TO_SLEEP" seconds
+  esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
+  Serial.println("Setup ESP32 to sleep for every " + String(TIME_TO_SLEEP) + " Seconds");
+  Serial.println("Going to sleep now");
+  Serial.flush(); 
 }
 
 
@@ -141,47 +164,104 @@ void sendPayloadAndWaitAck() {
 
   unsigned long start = millis();
   while (!ackReceived && millis() - start < ACK_TIMEOUT_MS) {
-    // Aguarda o callback setar ackReceived
-    delay(10);
+    // Wait callback to set ackReceived
+    ledAnimationSnake();
+    delay(20);
   }
-
+  
   if (ackReceived) {
-    Serial.println("ACK recebido do mestre");
+    ledBlinking(LED::green, 10);
+    Serial.println("ACK recevied from master");
   } else {
-    Serial.println("Nenhum ACK (timeout)");
+    ledBlinking(LED::red, 10);
+    Serial.println("NACK (timeout)");
   }
 }
 
-void measureSensors(){
-  int rawVoltage = analogRead(26); 
-  float voltage = (rawVoltage / 4095.0) * 3.3;
-  myData.voltage = voltage * 100;  // Envia em centivolts
 
-  // @@IMPLEMENTAR TEMP
-  myData.temperature = random(200, 300);  // Exemplo: 20.0°C a 30.0°C
+void initSensors(){
+  // Init voltage adc - ADS1115
+  Wire.begin();
+  if(!adc.init()){
+    Serial.println("ADS1115 not found!");
+  }
+  adc.setVoltageRange_mV(ADS1115_RANGE_6144);
+  adc.setMeasureMode(ADS1115_CONTINUOUS);
+
+  // Init temp sensor - DS18B20
+  tmp_sensor.begin();
+  if (tmp_sensor.getAddress(tmp_add, 0)){
+    TMP::tmp_found = true;
+  } else {
+    Serial.println("DS18B20 not found at init!");
+    TMP::tmp_found = false;
+  }
+}
+
+
+void measureSensors(){
+  float voltage = getVoltage();
+  float temperature = getTemperature();
+
+  myData.voltage = voltage;
+  myData.temperature = temperature;
   myData.id = NODE_ID;
 }
 
-void configureWakeups() {
-  // Configure wakeup via button (EXT0)
-  esp_sleep_enable_ext0_wakeup(WAKEUP_GPIO, 1);
-  rtc_gpio_pullup_dis(WAKEUP_GPIO);
-  rtc_gpio_pulldown_en(WAKEUP_GPIO);
 
-  // Configure wakeup source every "TIME_TO_SLEEP" seconds
-  esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
-  Serial.println("Setup ESP32 to sleep for every " + String(TIME_TO_SLEEP) + " Seconds");
-  Serial.println("Going to sleep now");
+float getVoltage(){
+  // Reading voltage - ADS1115
+  float voltage = 0.0;
+  const int samples = 5;
+  float sum = 0.0;
+  
+  adc.setCompareChannels(ADS1115_COMP_0_GND);
 
-  delay(1000);
-  Serial.flush(); 
+  for (int i = 0; i < samples; i++){
+    sum += adc.getResult_V();
+    delay(50);
+  }
+  
+  voltage = sum / samples;
+  Serial.print("Pino A0: ");
+  Serial.print(voltage, 2);
+  
+  return voltage; // alternative: getResult_mV for Millivolt
+}
+
+
+float getTemperature(){
+  // Reading temp sensor - DS18B20
+  if (!TMP::tmp_found){
+    return -127.0;
+  }
+  
+  const int samples = 5;
+  int readings = 0;
+  float sum = 0.0;
+
+  for (int i = 0; i < samples; i++){
+    tmp_sensor.requestTemperatures();
+    float tempC = tmp_sensor.getTempC(tmp_add);
+    if (tempC != -127.0 && tempC != 85.0){
+        sum += tempC;
+        readings++;
+      }
+    
+    delay(300);
+  }
+
+  float average = readings > 0 ? sum / readings : -127.0;
+  Serial.printf("Tmp average: %.2f C (%d valid readings)\n", average, readings);
+  
+  return roundf(average * 100.0) / 100.0;
 }
 
 
 void levelUS() {
   float distance_cm = 0;
 
-  while (distance_cm > US::limit){
+  do{
     pinMode(US::echo, INPUT);
     pinMode(US::trig, OUTPUT);
     digitalWrite(US::trig, LOW);
@@ -191,29 +271,53 @@ void levelUS() {
     digitalWrite(US::trig, LOW);
 
     long duration = pulseIn(US::echo, HIGH, 30000); // timeout 30 ms
-    float distance_cm = duration * 0.0343 / 2;
+    distance_cm = duration * 0.0343 / 2;
 
     Serial.printf("Nível: %.1f cm\n", distance_cm);
-  }
-
-  ledUSLimit();
-
+    delay(100);
+  } while (distance_cm > US::limit);
+  
+  ledBlinking(LED::green, 20);
 }
 
-void ledUSLimit(){
 
-  for (int i = 0; i<40; i++){
-    
+void ledBlinking(int ledPin, int sec){
+  for (int i = 0; i< sec*2; i++){
     Serial.println("blinking led");
-    digitalWrite(LED::white, HIGH);
+    digitalWrite(ledPin, HIGH);
     delay(250);
-    digitalWrite(LED::white, LOW);
+    digitalWrite(ledPin, LOW);
     delay(250);
   }
 
-  digitalWrite(LED::white, 0);
+  digitalWrite(ledPin, 0);
 }
 
-// void ledSendingInfo(){};
-// void ledAckOK(){};
-// void ledDeepSleep(){};
+
+void ledAnimationSnake() {
+  static const int leds[] = {LED::red, LED::yellow, LED::green};
+  static const int ledCount = sizeof(leds) / sizeof(leds[0]);
+  static int currentLed = 0;
+  const int delayMS = 100;
+  static unsigned long lastUpdate = 0;
+
+  unsigned long now = millis();
+  if (now - lastUpdate >= delayMS) {
+    for (int i = 0; i < ledCount; i++) {
+      digitalWrite(leds[i], LOW);
+    }
+
+    digitalWrite(leds[currentLed], HIGH);
+
+    currentLed = (currentLed + 1) % ledCount;
+    lastUpdate = now;
+  }
+}
+
+void ledTurnOff(){
+  const int leds[] = {LED::red, LED::yellow, LED::green};
+  const int ledCount = sizeof(leds) / sizeof(leds[0]);
+  for (int i = 0; i < ledCount; i++) {
+    digitalWrite(leds[i], LOW);
+  }
+}
