@@ -10,10 +10,11 @@
 //#define TIME_TO_SLEEP  30*60
 #define TIME_TO_SLEEP  300
 #define ACK_TIMEOUT_MS 2000
+//#define MAX_RETRIES 3     //@@implementation for resend payload after ACK NOK
 
 #define BUTTON_PIN_BITMASK(GPIO) (1ULL << GPIO)  // 2 ^ GPIO_NUMBER in hex
 #define USE_EXT0_WAKEUP          0               // 1 = EXT0 wakeup, 0 = EXT1 wakeup
-#define WAKEUP_GPIO              GPIO_NUM_33     // Only RTC IO are allowed - ESP32 Pin example
+#define WAKEUP_GPIO              GPIO_NUM_33     // Only RTC IO are allowed
 
 #define I2C_ADDRESS 0x48  // ADS1115
 
@@ -87,7 +88,7 @@ void setup() {
   esp_sleep_wakeup_cause_t wakeup_reason= esp_sleep_get_wakeup_cause();
 
   if (wakeup_reason == ESP_SLEEP_WAKEUP_EXT0){
-    levelUS();
+    checkLevelUntilLimit();
   } else if (wakeup_reason == ESP_SLEEP_WAKEUP_TIMER){
     initSensors();
     measureSensors();
@@ -151,7 +152,7 @@ void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
 }
 
 
-void onAckRecv(const uint8_t *mac, const uint8_t *data, int len) {
+void onAckRecv(const esp_now_recv_info_t *mac, const uint8_t *data, int len) {
   ack_message *ack = (ack_message *)data;
   if (ack->id == NODE_ID && ack->ok) {
     ackReceived = true;
@@ -170,11 +171,11 @@ void sendPayloadAndWaitAck() {
   }
   
   if (ackReceived) {
-    ledBlinking(LED::green, 10);
-    Serial.println("ACK recevied from master");
+    Serial.println("ACK OK recevied from master");
+    ledAnimationBlinking(LED::green, 10);
   } else {
-    ledBlinking(LED::red, 10);
-    Serial.println("NACK (timeout)");
+    Serial.println("ACK NOK (timeout)");
+    ledAnimationBlinking(LED::red, 10);
   }
 }
 
@@ -203,9 +204,9 @@ void measureSensors(){
   float voltage = getVoltage();
   float temperature = getTemperature();
 
+  myData.id = NODE_ID;
   myData.voltage = voltage;
   myData.temperature = temperature;
-  myData.id = NODE_ID;
 }
 
 
@@ -258,32 +259,44 @@ float getTemperature(){
 }
 
 
-void levelUS() {
+void checkLevelUntilLimit() {
+  const int samples = 5;
   float distance_cm = 0;
+   pinMode(US::echo, INPUT);
+  pinMode(US::trig, OUTPUT);
 
   do{
-    pinMode(US::echo, INPUT);
-    pinMode(US::trig, OUTPUT);
-    digitalWrite(US::trig, LOW);
-    delayMicroseconds(2);
-    digitalWrite(US::trig, HIGH);
-    delayMicroseconds(10);
-    digitalWrite(US::trig, LOW);
 
-    long duration = pulseIn(US::echo, HIGH, 30000); // timeout 30 ms
-    distance_cm = duration * 0.0343 / 2;
+    float sum = 0;
 
+    for (int i = 0; i < samples; i++){
+      digitalWrite(US::trig, LOW);
+      delayMicroseconds(2);
+      digitalWrite(US::trig, HIGH);
+      delayMicroseconds(10);
+      digitalWrite(US::trig, LOW);
+
+      long duration = pulseIn(US::echo, HIGH, 30000); // timeout 30 ms
+      float us_read = duration * 0.0343 / 2;
+
+      sum += us_read;
+      delay(50);
+    }
+
+    distance_cm = sum / samples;
+    
     Serial.printf("Nível: %.1f cm\n", distance_cm);
+    ledAnimationPingPong();
     delay(100);
   } while (distance_cm > US::limit);
   
-  ledBlinking(LED::green, 20);
+  ledAnimationBlinking(LED::green, 20);
 }
 
 
-void ledBlinking(int ledPin, int sec){
-  for (int i = 0; i< sec*2; i++){
-    Serial.println("blinking led");
+void ledAnimationBlinking(int ledPin, int sec){
+  for (int i = 0; i < sec*2; i++){
+    Serial.println("Blinking led");
     digitalWrite(ledPin, HIGH);
     delay(250);
     digitalWrite(ledPin, LOW);
@@ -313,6 +326,29 @@ void ledAnimationSnake() {
     lastUpdate = now;
   }
 }
+
+
+void ledAnimationPingPong(){
+  static const int sequence[][3] = {
+    {1, 0, 1}, // red & green
+    {0, 1, 0}, // yellow
+  };
+
+  static int state = 0;
+  static unsigned long lastChange = 0;
+  const int delayMS = 250;
+  const int leds[] = { LED::red, LED::yellow, LED::green };
+
+  unsigned long now = millis();
+  if (now - lastChange >= delayMS) {
+    for (int i = 0; i < 3; i++) {
+      digitalWrite(leds[i], sequence[state][i]);
+    }
+    state = (state + 1) % 2;
+    lastChange = now;
+  }
+}
+
 
 void ledTurnOff(){
   const int leds[] = {LED::red, LED::yellow, LED::green};
