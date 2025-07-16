@@ -5,6 +5,7 @@
 #include <DallasTemperature.h>
 #include <ADS1115_WE.h>
 #include <Wire.h>
+#include "LedAnimations.h"
 
 #define uS_TO_S_FACTOR 1000000ULL
 //#define TIME_TO_SLEEP  30*60
@@ -25,9 +26,9 @@ uint8_t masterMacAddress[] = {0x14, 0x33, 0x5C, 0x02, 0xED, 0x6C};
 
 // Structure to send data. Must match the receiver structure
 typedef struct struct_message {
-    int id; // Unique for each sender
-    float voltage;
-    float temperature; 
+  int id; // Unique for each sender
+  float voltage;
+  float temperature; 
 } struct_message;
 
 typedef struct {
@@ -44,12 +45,6 @@ namespace US {
 namespace TMP {
   const int tmp_pin = 23;
   bool tmp_found = false;
-}
-
-namespace LED {
-  const int yellow = 25;
-  const int red = 18;
-  const int green = 19;
 }
 
 RTC_DATA_ATTR int bootCount = 0;
@@ -72,13 +67,13 @@ ADS1115_WE adc(I2C_ADDRESS);
 
 
 void setup() {
-  // Init Serial Monitor
   Serial.begin(115200);
    
   pinMode(LED::yellow, OUTPUT);
   pinMode(LED::red, OUTPUT);
   pinMode(LED::green, OUTPUT);
 
+  // Count boot resets
   ++bootCount;
   Serial.println("Boot number: " + String(bootCount));
 
@@ -125,13 +120,14 @@ void setupESPNow(){
 
   // Init ESP-NOW
   if (esp_now_init() != ESP_OK) {
-    Serial.println("Error initializing ESP-NOW");
+    Serial.println("ERROR initializing ESP-NOW");
     return;
   }
   
-  // Once ESPNow is successfully Init, we will register for Send CB to get the status of Transmitted packet
+  // Register for Send and Recv CB to get the status of packets
   esp_now_register_send_cb(onDataSent);
   esp_now_register_recv_cb(onAckRecv);
+  Serial.println("Successfully initialized ESP-NOW");
   
   // Register peer
   memcpy(peerInfo.peer_addr, masterMacAddress, 6);
@@ -140,7 +136,7 @@ void setupESPNow(){
   
   // Add peer        
   if (esp_now_add_peer(&peerInfo) != ESP_OK){
-    Serial.println("Failed to add peer");
+    Serial.println("FAILED to add peer");
     return;
   }
 }
@@ -148,7 +144,7 @@ void setupESPNow(){
 // callback when data is sent
 void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
   Serial.print("\r\nLast Packet Send Status:\t");
-  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery Fail");
+  Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery FAIL");
 }
 
 
@@ -166,7 +162,9 @@ void sendPayloadAndWaitAck() {
   unsigned long start = millis();
   while (!ackReceived && millis() - start < ACK_TIMEOUT_MS) {
     // Wait callback to set ackReceived
-    ledAnimationSnake();
+    ledNewData();
+    ledUpdateNewData();
+    ledUpdateBlinking(); 
     delay(20);
   }
   
@@ -224,7 +222,7 @@ float getVoltage(){
   }
   
   voltage = sum / samples;
-  Serial.print("Pino A0: ");
+  Serial.print("Pin A0: ");
   Serial.print(voltage, 2);
   
   return voltage; // alternative: getResult_mV for Millivolt
@@ -253,7 +251,7 @@ float getTemperature(){
   }
 
   float average = readings > 0 ? sum / readings : -127.0;
-  Serial.printf("Tmp average: %.2f C (%d valid readings)\n", average, readings);
+  Serial.printf("Temp average: %.2f°C (%d valid readings)\n", average, readings);
   
   return roundf(average * 100.0) / 100.0;
 }
@@ -285,75 +283,10 @@ void checkLevelUntilLimit() {
 
     distance_cm = sum / samples;
     
-    Serial.printf("Nível: %.1f cm\n", distance_cm);
-    ledAnimationPingPong();
+    Serial.printf("Level: %.1f cm\n", distance_cm);
+    ledAnimationSnake();
     delay(100);
   } while (distance_cm > US::limit);
   
   ledAnimationBlinking(LED::green, 20);
-}
-
-
-void ledAnimationBlinking(int ledPin, int sec){
-  for (int i = 0; i < sec*2; i++){
-    Serial.println("Blinking led");
-    digitalWrite(ledPin, HIGH);
-    delay(250);
-    digitalWrite(ledPin, LOW);
-    delay(250);
-  }
-
-  digitalWrite(ledPin, 0);
-}
-
-
-void ledAnimationSnake() {
-  static const int leds[] = {LED::red, LED::yellow, LED::green};
-  static const int ledCount = sizeof(leds) / sizeof(leds[0]);
-  static int currentLed = 0;
-  const int delayMS = 100;
-  static unsigned long lastUpdate = 0;
-
-  unsigned long now = millis();
-  if (now - lastUpdate >= delayMS) {
-    for (int i = 0; i < ledCount; i++) {
-      digitalWrite(leds[i], LOW);
-    }
-
-    digitalWrite(leds[currentLed], HIGH);
-
-    currentLed = (currentLed + 1) % ledCount;
-    lastUpdate = now;
-  }
-}
-
-
-void ledAnimationPingPong(){
-  static const int sequence[][3] = {
-    {1, 0, 1}, // red & green
-    {0, 1, 0}, // yellow
-  };
-
-  static int state = 0;
-  static unsigned long lastChange = 0;
-  const int delayMS = 250;
-  const int leds[] = { LED::red, LED::yellow, LED::green };
-
-  unsigned long now = millis();
-  if (now - lastChange >= delayMS) {
-    for (int i = 0; i < 3; i++) {
-      digitalWrite(leds[i], sequence[state][i]);
-    }
-    state = (state + 1) % 2;
-    lastChange = now;
-  }
-}
-
-
-void ledTurnOff(){
-  const int leds[] = {LED::red, LED::yellow, LED::green};
-  const int ledCount = sizeof(leds) / sizeof(leds[0]);
-  for (int i = 0; i < ledCount; i++) {
-    digitalWrite(leds[i], LOW);
-  }
 }
