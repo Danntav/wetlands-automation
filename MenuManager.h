@@ -1,5 +1,5 @@
-#ifndef MENU_MANAGER_H
-#define MENU_MANAGER_H
+#ifndef _MENU_MANAGER_H_
+#define _MENU_MANAGER_H_
 
 #include <Arduino.h>
 #include <Adafruit_GFX.h>
@@ -32,5 +32,6 @@ void drawMenu();
 void drawBoardStatus();
 void drawErrorList();
 void clearErrors();
+void animateTitle();
 
 #endif

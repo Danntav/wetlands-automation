@@ -26,7 +26,7 @@ uint8_t masterMacAddress[] = {0x14, 0x33, 0x5C, 0x02, 0xED, 0x6C};
 
 // Structure to send data. Must match the receiver structure
 typedef struct struct_message {
-  int id; // Unique for each sender
+  int id; // Unique for each slave
   float voltage;
   float temperature; 
 } struct_message;
@@ -83,8 +83,10 @@ void setup() {
   esp_sleep_wakeup_cause_t wakeup_reason= esp_sleep_get_wakeup_cause();
 
   if (wakeup_reason == ESP_SLEEP_WAKEUP_EXT0){
+    Serial.println("Waked up by BTN");
     checkLevelUntilLimit();
   } else if (wakeup_reason == ESP_SLEEP_WAKEUP_TIMER){
+    Serial.println("Waked up by RTC");
     initSensors();
     measureSensors();
     sendPayloadAndWaitAck();
@@ -92,7 +94,8 @@ void setup() {
     Serial.println("First Boot");
   }
   ledTurnOff();
-  
+
+  Serial.println("Going to sleep now");
   esp_deep_sleep_start();
 }
 
@@ -109,7 +112,6 @@ void configureWakeups() {
   // Configure wakeup source every "TIME_TO_SLEEP" seconds
   esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
   Serial.println("Setup ESP32 to sleep for every " + String(TIME_TO_SLEEP) + " Seconds");
-  Serial.println("Going to sleep now");
   Serial.flush(); 
 }
 
@@ -120,14 +122,14 @@ void setupESPNow(){
 
   // Init ESP-NOW
   if (esp_now_init() != ESP_OK) {
-    Serial.println("ERROR initializing ESP-NOW");
+    Serial.println("ERROR init ESP-NOW");
     return;
   }
   
   // Register for Send and Recv CB to get the status of packets
   esp_now_register_send_cb(onDataSent);
   esp_now_register_recv_cb(onAckRecv);
-  Serial.println("Successfully initialized ESP-NOW");
+  Serial.println("Successfully init ESP-NOW");
   
   // Register peer
   memcpy(peerInfo.peer_addr, masterMacAddress, 6);
@@ -182,7 +184,7 @@ void initSensors(){
   // Init voltage adc - ADS1115
   Wire.begin();
   if(!adc.init()){
-    Serial.println("ADS1115 not found!");
+    Serial.println("ERROR ADS1115 not found!");
   }
   adc.setVoltageRange_mV(ADS1115_RANGE_6144);
   adc.setMeasureMode(ADS1115_CONTINUOUS);
@@ -260,7 +262,7 @@ float getTemperature(){
 void checkLevelUntilLimit() {
   const int samples = 5;
   float distance_cm = 0;
-   pinMode(US::echo, INPUT);
+  pinMode(US::echo, INPUT);
   pinMode(US::trig, OUTPUT);
 
   do{

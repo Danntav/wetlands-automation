@@ -1,5 +1,5 @@
-#ifndef DATA_STRUCTURES_H
-#define DATA_STRUCTURES_H
+#ifndef _DATA_STRUCTURES_H_
+#define _DATA_STRUCTURES_H_
 
 typedef struct struct_message {
   int id;

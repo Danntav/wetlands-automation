@@ -7,7 +7,20 @@ void setup() {
 }
 
 void loop() {
-  Serial.print("MAC WiFi STA: ");
+  uint8_t mac[6];
+  WiFi.macAddress(mac);
+  Serial.println("MAC WiFi STA: ");
   Serial.println(WiFi.macAddress());
+  Serial.print("{");
+  for (int i = 0; i < 6; i++) {
+    Serial.printf("0x%02X", mac[i]);
+    if (i < 5) {
+      Serial.print(", ");
+    }
+  }
+  Serial.println("};");
+
+  
+  
   delay(10000);
 }

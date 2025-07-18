@@ -3,7 +3,7 @@
 
 namespace LED {
   const int yellow = 25;
-  const int red = 18;
+  const int red = 21;
   const int green = 19;
 }
 
