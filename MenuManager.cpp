@@ -4,7 +4,7 @@
 #include <Adafruit_ST7735.h>
 
 extern struct_message boards[9];
-//extern String getCurrentTimestamp(); @@ FALTA IMPLEMENTAR RTC
+extern String getTimestamp();
 
 extern String errorMsgs[];
 extern int errorCount;
@@ -119,7 +119,7 @@ void drawBoardStatus() {
   tft->setCursor(10, 40);
   tft->setTextColor(ST77XX_CYAN);
   tft->print("TS: ");
-  //tft->print(getCurrentTimestamp()); @@
+  tft->print(getTimestamp());
 
   tft->setTextColor(ST77XX_GREEN);
   tft->setCursor(10, 60);

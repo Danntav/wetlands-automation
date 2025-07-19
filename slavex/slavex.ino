@@ -9,7 +9,7 @@
 
 #define uS_TO_S_FACTOR 1000000ULL
 //#define TIME_TO_SLEEP  30*60
-#define TIME_TO_SLEEP  300
+#define TIME_TO_SLEEP  30
 #define ACK_TIMEOUT_MS 2000
 //#define MAX_RETRIES 3     //@@implementation for resend payload after ACK NOK
 
@@ -145,7 +145,7 @@ void setupESPNow(){
 
 // callback when data is sent
 void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
-  Serial.print("\r\nLast Packet Send Status:\t");
+  Serial.print("\r\nLast Packet Send Status: ");
   Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery FAIL");
 }
 
