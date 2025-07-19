@@ -9,35 +9,8 @@
 #include "MenuManager.h"
 #include "DataStructures.h"
 
-
 #define BOARD_STATUS_INTERVAL_MS (5UL * 60UL * 1000UL)  // 5 min
-#define TOTAL_SLAVES 9
 #define NODE_ID_UNKNOWN 0
-#define MAX_ERRORS 10
-
-// Display pins
-#define TFT_CS  15
-#define TFT_RST 4
-#define TFT_DC  2
-// Other TFT Pins follows the ESP32 VSPI Pattern, no need to specify them
-// TFT_SDA 23
-// TFT_SCK 18
-
-// Joystick pins
-#define JOY_X_PIN 32
-#define JOY_Y_PIN 33
-#define JOY_BTN_PIN 25
-
-// RTC pins
-#define RTC_SCL 22
-#define RTC_SDA 21
-
-// SD card pins
-#define SD_FILE    "/data.csv"
-#define SD_SCK  14
-#define SD_MISO 13
-#define SD_MOSI 12
-#define SD_CS   27
 
 // Map all slave's MAC
 const uint8_t slaveMacs[TOTAL_SLAVES][6] = {
@@ -55,20 +28,6 @@ const uint8_t slaveMacs[TOTAL_SLAVES][6] = {
 // Master's MAC
 //uint8_t masterMacAddress[] = {0x14, 0x33, 0x5C, 0x02, 0xED, 0x6C};
 
-// Structure to send ack. Must match the slave structure
-typedef struct ack_message {
-  int id;
-  bool ok;
-} ack_message;
-
-// ---------- Joystick struct ----------
-struct JoystickState {
-  bool left = false;
-  bool right = false;
-  bool up = false;
-  bool down = false;
-  bool click = false;
-};
 
 JoystickState readJoystick() {
   const int deadZone = 600;  // margem para ignorar ruído no centro
@@ -100,7 +59,6 @@ JoystickState readJoystick() {
 JoystickState prevJs;              // armazena a última leitura
 unsigned long lastNavTime = 0;     // timestamp da última ação de navegação
 const unsigned long NAV_DEBOUNCE = 200;  // 150 ms entre mudanças
-
 unsigned long lastJoyMove = 0;
 // -------------------------------------
 
@@ -144,7 +102,6 @@ void setup() {
   setupESPNow();
   delay(1000);
   setupJoy();
-  
   
 }
  
