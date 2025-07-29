@@ -73,8 +73,6 @@ struct_message boards[TOTAL_SLAVES];
 
 RTC_DS1307 rtc; //DS1307
 
-File sdFile;
-
 // Init ST7735 display
 Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);
 
@@ -85,11 +83,10 @@ void setup() {
   Serial.begin(115200);
   delay(1500);
   ledTurnOff();
+  setupLeds();
   setupDisplay();
   delay(1500);
   setupRTC();
-  delay(1000);
-  setupSD();
   delay(1000);
 
   for (int i = 0; i < TOTAL_SLAVES; i++) {
@@ -97,8 +94,6 @@ void setup() {
     boards[i].voltage = 0.0;
     boards[i].temperature = 0.0;
   }
-
-  // Configure modules
   setupESPNow();
   delay(1000);
   setupJoy();
@@ -125,6 +120,7 @@ void setupESPNow() {
     ledAnimationBlinking(LED::red, 20);
     return;
   }
+  esp_now_register_recv_cb(onDataRecv);
   // Register all Slaves
   for (int i = 0; i < TOTAL_SLAVES; i++) {
     esp_now_peer_info_t peerInfo = {};
@@ -137,7 +133,7 @@ void setupESPNow() {
       ledAnimationBlinking(LED::red, 20);
     }
   }
-  delay(3000);
+  delay(1000);
   Serial.println("ESP-NOW Successfully initialized");
   ledAnimationBlinking(LED::green, 5);
 }
@@ -155,61 +151,34 @@ void setupRTC(){
     logErrorDisplay("ERROR RTC not running");
     ledAnimationBlinking(LED::red, 20);
     // Ajustar data/hora inicial (ajuste para a data atual, ex.: 17/07/2025 20:21:00)
-    rtc.adjust(DateTime(2025, 7, 17, 20, 31, 0));
+    rtc.adjust(DateTime(2025, 7, 19, 16, 30, 0));
   } else {
     Serial.println("RTC successfully initialized");
     ledAnimationBlinking(LED::green, 5);
   }
 }
 
-void setupSD() {
-  pinMode(SD_CS, OUTPUT);
-  digitalWrite(SD_CS, HIGH); // Desselecionar SD
-  SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
-  delay(100);
-  sdInitialized = SD.begin(SD_CS);
-  delay(100);
-  if (!sdInitialized) {
-    Serial.println("ERROR init SD!");
-    logErrorDisplay("ERROR init SD!");
-    ledAnimationBlinking(LED::red, 20);
-    SPI.end(); // Liberar SPI
-    return;
-  }
 
-  Serial.println("SD successfully initialized.");
-  ledAnimationBlinking(LED::green, 5);
-
-  if (!SD.exists(SD_FILE)) {
-    File f = SD.open(SD_FILE, FILE_WRITE);
-    if (f) {
-      f.println("timestamp,id,voltage,temperature");
-      f.close();
-      Serial.println("Created /data.csv");
-    }else {
-      Serial.println("ERROR: Failed to create /data.csv");
-      logErrorDisplay("ERROR: Failed to create /data.csv");
-    }
-  }
-  
-  SPI.end(); // Liberar SPI após inicialização
-  delay(100);
-}
-
-
-void setupDisplay(){
+void setupDisplay() {
   pinMode(TFT_CS, OUTPUT);
   pinMode(TFT_DC, OUTPUT);
   pinMode(TFT_RST, OUTPUT);
-  digitalWrite(TFT_CS, HIGH); // Desselecionar CS
-  delay(100);
-  SPI.begin(18, -1, 23, 15); // VSPI: SCK=18, MOSI=23, CS=15
-  delay(100);
+  pinMode(SD_CS, OUTPUT);
+  digitalWrite(TFT_CS, HIGH);
+  digitalWrite(SD_CS, HIGH);
+  delay(500);
+  digitalWrite(TFT_CS, LOW);
+  SPI.begin(SD_SCK, SD_MISO, SD_MOSI, TFT_CS);
+  Serial.println("Initializing display...");
   tft.initR(INITR_BLACKTAB);
   tft.setRotation(1);
   tft.fillScreen(ST77XX_BLACK);
+  Serial.println("Display initialized successfully");
+  digitalWrite(TFT_CS, HIGH);
+  SPI.end();
+  Serial.println("Starting initMenu...");
   initMenu(&tft);
-  SPI.end(); // Liberar VSPI após inicialização
+  Serial.println("setupDisplay completed");
 }
 
 
@@ -282,7 +251,7 @@ void boardStatus(){
     Serial.println("--- Board Status ---");
     for (int i = 0; i < TOTAL_SLAVES; i++) {
       if (boards[i].id != NODE_ID_UNKNOWN) {
-        Serial.printf("Board %d → V=%.2fV, T=%.2f°C\n",
+        Serial.printf("Board %d → V=%.3fV, T=%.3f°C\n",
           boards[i].id,
           boards[i].voltage,
           boards[i].temperature
@@ -296,17 +265,41 @@ void boardStatus(){
 
 
 void logToSD(const struct_message &msg) {
-  if (!sdInitialized) return;
-  sdFile = SD.open(SD_FILE, FILE_APPEND);
+  digitalWrite(TFT_CS, HIGH);
+  digitalWrite(SD_CS, HIGH);
+  SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+  delay(200);
+  digitalWrite(SD_CS, LOW);
+  Serial.println("Initializing SD...");
+  sdInitialized = SD.begin(SD_CS);
+  if (!sdInitialized) {
+    Serial.println("ERROR init SD!");
+    digitalWrite(TFT_CS, LOW);
+    logErrorDisplay("ERROR init SD!");
+    digitalWrite(TFT_CS, HIGH);
+    ledAnimationBlinking(LED::red, 20);
+    digitalWrite(SD_CS, HIGH);
+    SPI.end();
+    return;
+  }
+  Serial.println("SD initialized successfully");
+  File sdFile = SD.open(SD_FILE, FILE_APPEND);
   if (!sdFile) {
     Serial.println("ERROR: file didn't open!");
+    digitalWrite(TFT_CS, LOW);
     logErrorDisplay("ERROR: file didn't open!");
+    digitalWrite(TFT_CS, HIGH);
     ledAnimationBlinking(LED::red, 20);
+    digitalWrite(SD_CS, HIGH);
+    SPI.end();
     return;
   }
   String timestamp = getTimestamp();
   sdFile.printf("%s,%d,%.2f,%.2f\n", timestamp.c_str(), msg.id, msg.voltage, msg.temperature);
   sdFile.close();
+  Serial.println("Data written to SD");
+  digitalWrite(SD_CS, HIGH);
+  SPI.end();
 }
 
 
@@ -337,37 +330,24 @@ void scanI2C() {
 
 
 void logErrorDisplay(String msg) {
+  digitalWrite(SD_CS, HIGH);
+  digitalWrite(TFT_CS, HIGH);
+  SPI.begin(SD_SCK, SD_MISO, SD_MOSI, TFT_CS);
+  delay(10);
+  digitalWrite(TFT_CS, LOW);
   String timestamp = getTimestamp();
   String fullErrorMsg = timestamp + "@" + msg;
   if (errorCount < MAX_ERRORS) {
     errorMsgs[errorCount++] = fullErrorMsg;
   } else {
-    // Circular Shift
     for (int i = 1; i < MAX_ERRORS; i++) {
       errorMsgs[i - 1] = errorMsgs[i];
     }
     errorMsgs[MAX_ERRORS - 1] = fullErrorMsg;
   }
+  digitalWrite(TFT_CS, HIGH);
+  SPI.end();
 }
-
-
-// void logErrorNoRTC(String msg) {
-//   unsigned long seconds = millis() / 1000;
-//   int minutes = (seconds / 60) % 60;
-//   int hours = (seconds / 3600) % 24;
-//   int secs = seconds % 60;
-//   char buf[20];
-//   snprintf(buf, sizeof(buf), "1970-01-01 %02d:%02d:%02d", hours, minutes, secs);
-//   String fullErrorMsg = String(buf) + "@" + msg;
-//   if (errorCount < MAX_ERRORS) {
-//     errorMsgs[errorCount++] = fullErrorMsg;
-//   } else {
-//     for (int i = 1; i < MAX_ERRORS; i++) {
-//       errorMsgs[i - 1] = errorMsgs[i];
-//     }
-//     errorMsgs[MAX_ERRORS - 1] = fullErrorMsg;
-//   }
-// }
 
 
 void handleJoystick() {

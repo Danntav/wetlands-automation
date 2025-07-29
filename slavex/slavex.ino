@@ -212,7 +212,7 @@ void measureSensors(){
 
 float getVoltage(){
   // Reading voltage - ADS1115
-  float voltage = 0.0;
+  float voltage = 0.00;
   const int samples = 5;
   float sum = 0.0;
   
@@ -225,7 +225,7 @@ float getVoltage(){
   
   voltage = sum / samples;
   Serial.print("Pin A0: ");
-  Serial.print(voltage, 2);
+  Serial.print(voltage, 3);
   
   return voltage; // alternative: getResult_mV for Millivolt
 }
