@@ -15,7 +15,7 @@ void loop() {
   for (int i = 0; i < 6; i++) {
     Serial.printf("0x%02X", mac[i]);
     if (i < 5) {
-      Serial.print(", ");
+      Serial.print(",");
     }
   }
   Serial.println("};");

@@ -22,7 +22,7 @@
 #define NODE_ID 1
 
 // Master's MAC
-uint8_t masterMacAddress[] = {0x14, 0x33, 0x5C, 0x02, 0xED, 0x6C};
+uint8_t masterMacAddress[] = {0x3C, 0x8A, 0x1F, 0x5E, 0x16, 0x48};
 
 // Structure to send data. Must match the receiver structure
 typedef struct struct_message {
