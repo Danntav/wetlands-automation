@@ -2610,6 +2610,28 @@
 			)
 		)
 	)
+	(global_label "GPIO35"
+		(shape input)
+		(at 27.94 113.03 180)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right)
+		)
+		(uuid "0af77408-e218-4291-8e5f-680d66a75e7f")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 18.0605 113.03 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
+				(hide yes)
+			)
+		)
+	)
 	(global_label "TX2"
 		(shape input)
 		(at 60.96 60.325 0)
@@ -2870,6 +2892,28 @@
 					(size 1.27 1.27)
 				)
 				(justify left)
+				(hide yes)
+			)
+		)
+	)
+	(global_label "GPIO34"
+		(shape input)
+		(at 27.94 110.49 180)
+		(fields_autoplaced yes)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify right)
+		)
+		(uuid "5d0e7218-9c70-4ba3-84eb-412a23db0522")
+		(property "Intersheetrefs" "${INTERSHEET_REFS}"
+			(at 18.0605 110.49 0)
+			(effects
+				(font
+					(size 1.27 1.27)
+				)
+				(justify right)
 				(hide yes)
 			)
 		)
@@ -3160,28 +3204,6 @@
 			)
 		)
 	)
-	(global_label "GPIO26"
-		(shape input)
-		(at 27.94 110.49 180)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right)
-		)
-		(uuid "9b6799a5-5abd-4381-810d-3623e516d5a3")
-		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 18.0605 110.49 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
-				(hide yes)
-			)
-		)
-	)
 	(global_label "GPIO23"
 		(shape input)
 		(at 93.98 111.76 0)
@@ -3244,28 +3266,6 @@
 					(size 1.27 1.27)
 				)
 				(justify left)
-				(hide yes)
-			)
-		)
-	)
-	(global_label "GPIO27"
-		(shape input)
-		(at 27.94 113.03 180)
-		(fields_autoplaced yes)
-		(effects
-			(font
-				(size 1.27 1.27)
-			)
-			(justify right)
-		)
-		(uuid "bd5e004e-f533-4c2b-a2c0-a5a69dc06d7c")
-		(property "Intersheetrefs" "${INTERSHEET_REFS}"
-			(at 18.0605 113.03 0)
-			(effects
-				(font
-					(size 1.27 1.27)
-				)
-				(justify right)
 				(hide yes)
 			)
 		)
@@ -3619,7 +3619,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "0851c85f-217c-4750-bb92-7edf2aa26a0b")
-		(property "Reference" "220Ohm"
+		(property "Reference" "220Ohm2"
 			(at 146.304 110.998 90)
 			(effects
 				(font
@@ -3672,7 +3672,7 @@
 		(instances
 			(project "IC_GabrielVictor"
 				(path "/6989ec71-7bb6-4043-be66-284884750dd3"
-					(reference "220Ohm")
+					(reference "220Ohm2")
 					(unit 1)
 				)
 			)
@@ -3687,7 +3687,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "0d96b696-939f-42ed-9b4e-914250414739")
-		(property "Reference" "220Ohm"
+		(property "Reference" "220Ohm1"
 			(at 146.304 100.33 90)
 			(effects
 				(font
@@ -3740,7 +3740,7 @@
 		(instances
 			(project "IC_GabrielVictor"
 				(path "/6989ec71-7bb6-4043-be66-284884750dd3"
-					(reference "220Ohm")
+					(reference "220Ohm1")
 					(unit 1)
 				)
 			)
@@ -4822,7 +4822,7 @@
 		(on_board yes)
 		(dnp no)
 		(uuid "8e15cea9-771c-45b6-9dad-87c276dfb167")
-		(property "Reference" "220Ohm"
+		(property "Reference" "220Ohm3"
 			(at 146.05 121.158 90)
 			(effects
 				(font
@@ -4875,7 +4875,7 @@
 		(instances
 			(project "IC_GabrielVictor"
 				(path "/6989ec71-7bb6-4043-be66-284884750dd3"
-					(reference "220Ohm")
+					(reference "220Ohm3")
 					(unit 1)
 				)
 			)

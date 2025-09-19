@@ -63,10 +63,10 @@ void updateMenu(bool left, bool right, bool up, bool down, bool click) {
   switch (currentState) {
     case MENU_MAIN:
       if (up) {
-        selectedOption = (selectedOption + 2) % 3;  // navega para cima
+        selectedOption = (selectedOption + 2) % 3;  // navigation up
         drawMenu();
       } else if (down) {
-        selectedOption = (selectedOption + 1) % 3;  // navega para baixo
+        selectedOption = (selectedOption + 1) % 3;  // navigation down
         drawMenu();
       }
 
@@ -130,7 +130,7 @@ void drawMenu() {
   for (int i = 0; i < count; i++) {
     tft->fillRect(10, 60 + i * 20, 140, 16, i == selectedOption ? ST77XX_WHITE : ST77XX_BLACK);
     if (i == selectedOption) {
-      tft->setTextColor(ST77XX_BLACK, ST77XX_WHITE);  // destaque invertido
+      tft->setTextColor(ST77XX_BLACK, ST77XX_WHITE);  // inverted highlight
     } else {
       tft->setTextColor(ST77XX_WHITE);
     }

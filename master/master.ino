@@ -14,32 +14,32 @@
 
 // Map all slave's MAC
 const uint8_t slaveMacs[TOTAL_SLAVES][6] = {
-  {0x00,0x4B,0x12,0x21,0x32,0xA8},  // Slave 1
-  {0xE0,0xE2,0xE6,0x63,0x15,0xA0},  // Slave 2
-  {0x00,0x4B,0x12,0x22,0x43,0xC0},  // Slave 3
-  {0x38,0x18,0x2B,0xE8,0x6C,0x2C},  // Slave 4
-  {0x14,0x33,0x5C,0x02,0xE8,0x80},  // Slave 5
-  {0x00,0x4B,0x12,0x21,0xE6,0x68},  // Slave 6
-  {0x20,0x43,0xA8,0xE6,0x0B,0x30},  // Slave 7
-  {0x14,0x33,0x5C,0x02,0xED,0x6C},  // Slave 8
-  {0x14,0x33,0x5C,0x02,0xED,0xA6},  // Slave 9
- };
+  { 0x00, 0x4B, 0x12, 0x21, 0x32, 0xA8 },  // Slave 1
+  { 0xE0, 0xE2, 0xE6, 0x63, 0x15, 0xA0 },  // Slave 2
+  { 0x00, 0x4B, 0x12, 0x22, 0x43, 0xC0 },  // Slave 3
+  { 0x38, 0x18, 0x2B, 0xE8, 0x6C, 0x2C },  // Slave 4
+  { 0x14, 0x33, 0x5C, 0x02, 0xE8, 0x80 },  // Slave 5
+  { 0x00, 0x4B, 0x12, 0x21, 0xE6, 0x68 },  // Slave 6
+  { 0x20, 0x43, 0xA8, 0xE6, 0x0B, 0x30 },  // Slave 7
+  { 0x14, 0x33, 0x5C, 0x02, 0xED, 0x6C },  // Slave 8
+  { 0x14, 0x33, 0x5C, 0x02, 0xED, 0xA6 },  // Slave 9
+};
 
 // Master's MAC
 //uint8_t masterMacAddress[] = {0x3C, 0x8A, 0x1F, 0x5E, 0x16, 0x48};
 
 
 JoystickState readJoystick() {
-  const int deadZone = 600;  // margem para ignorar ruído no centro
+  const int deadZone = 600;  // ignoring center noise
   const int center = 2048;
-  static int prevX = center, prevY = center; // Armazena leituras anteriores para média móvel
-  const float alpha = 0.7;   // valor médio do ADC para 3.3V
+  static int prevX = center, prevY = center;  // store prev moving average readings
+  const float alpha = 0.7;                    // valor médio do ADC para 3.3V
 
   int rawX = analogRead(JOY_X_PIN);
   int rawY = analogRead(JOY_Y_PIN);
   bool btn = digitalRead(JOY_BTN_PIN) == LOW;
 
-  // Aplica média móvel para suavizar ruído
+  // Exponential moving average
   int x = alpha * rawX + (1 - alpha) * prevX;
   int y = alpha * rawY + (1 - alpha) * prevY;
   prevX = x;
@@ -56,9 +56,9 @@ JoystickState readJoystick() {
   return js;
 }
 
-JoystickState prevJs;              // armazena a última leitura
-unsigned long lastNavTime = 0;     // timestamp da última ação de navegação
-const unsigned long NAV_DEBOUNCE = 200;  // 150 ms entre mudanças
+JoystickState prevJs;                    // last reading
+unsigned long lastNavTime = 0;           // timestamp of the last move
+const unsigned long NAV_DEBOUNCE = 200;  // 200 ms between changes
 unsigned long lastJoyMove = 0;
 // -------------------------------------
 
@@ -71,7 +71,7 @@ int currentBoardIndex = 0;
 struct_message boards[TOTAL_SLAVES];
 
 
-RTC_DS1307 rtc; //DS1307
+RTC_DS1307 rtc;  //DS1307
 
 // Init ST7735 display
 Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);
@@ -97,9 +97,8 @@ void setup() {
   setupESPNow();
   delay(1000);
   setupJoy();
-  
 }
- 
+
 void loop() {
   handleJoystick();
   ledUpdateNewData();
@@ -139,7 +138,7 @@ void setupESPNow() {
 }
 
 
-void setupRTC(){
+void setupRTC() {
   Wire.begin(RTC_SDA, RTC_SCL);
   scanI2C();
   if (!rtc.begin()) {
@@ -197,7 +196,7 @@ void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
   memcpy(&msg, data, sizeof(msg));
 
   // Identifies slave by ID
-  int idx = msg.id - 1;  
+  int idx = msg.id - 1;
   if (idx < 0 || idx >= TOTAL_SLAVES) return;
   boards[idx] = msg;
 
@@ -215,11 +214,10 @@ void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
 
   Serial.printf("Received from %s (MAC %02X:%02X:%02X:%02X:%02X:%02X) "
                 "→ ID=%d, V=%.2fV, T=%.2f°C\n",
-    macStr,
-    info->src_addr[0],info->src_addr[1],info->src_addr[2],
-    info->src_addr[3],info->src_addr[4],info->src_addr[5],
-    msg.id, msg.voltage, msg.temperature
-  );
+                macStr,
+                info->src_addr[0], info->src_addr[1], info->src_addr[2],
+                info->src_addr[3], info->src_addr[4], info->src_addr[5],
+                msg.id, msg.voltage, msg.temperature);
 
   // Send ACK back
   ledNewData();
@@ -243,7 +241,7 @@ int findSlaveIndex(const uint8_t *mac) {
 }
 
 
-void boardStatus(){
+void boardStatus() {
   static unsigned long last = 0;
 
   if (millis() - last > BOARD_STATUS_INTERVAL_MS) {
@@ -252,10 +250,9 @@ void boardStatus(){
     for (int i = 0; i < TOTAL_SLAVES; i++) {
       if (boards[i].id != NODE_ID_UNKNOWN) {
         Serial.printf("Board %d → V=%.3fV, T=%.3f°C\n",
-          boards[i].id,
-          boards[i].voltage,
-          boards[i].temperature
-        );
+                      boards[i].id,
+                      boards[i].voltage,
+                      boards[i].temperature);
       }
     }
 
@@ -307,7 +304,7 @@ String getTimestamp() {
   if (!rtc.isrunning()) {
     Serial.println("ERROR RTC not running");
     logErrorDisplay("ERROR RTC not running");
-    return "1970-01-01 00:00:00"; 
+    return "1970-01-01 00:00:00";
   }
   DateTime now = rtc.now();
   char buf[20];

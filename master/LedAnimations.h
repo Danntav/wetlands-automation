@@ -2,9 +2,9 @@
 #define _LED_ANIMATIONS_H_
 
 namespace LED {
-  const int yellow = 25;
-  const int red = 21;
-  const int green = 19;
+  const int yellow = 33;
+  const int red = 32;
+  const int green = 25;
 }
 
 void setupLeds();
