@@ -9,7 +9,7 @@
 #include "MenuManager.h"
 #include "DataStructures.h"
 
-#define BOARD_STATUS_INTERVAL_MS (5UL * 60UL * 1000UL)  // 5 min
+#define COLLECTION_INTERVAL_MS (5UL * 60UL * 1000UL)  // 5 min
 #define NODE_ID_UNKNOWN 0
 
 // Map all slave's MAC
@@ -27,7 +27,6 @@ const uint8_t slaveMacs[TOTAL_SLAVES][6] = {
 
 // Master's MAC
 //uint8_t masterMacAddress[] = {0x3C, 0x8A, 0x1F, 0x5E, 0x16, 0x48};
-
 
 JoystickState readJoystick() {
   const int deadZone = 600;  // ignoring center noise
@@ -80,6 +79,9 @@ bool sdInitialized = false;
 
 
 void setup() {
+  pinMode(2, OUTPUT);
+  digitalWrite(2, LOW);
+  
   Serial.begin(115200);
   delay(1500);
   ledTurnOff();
@@ -103,8 +105,15 @@ void loop() {
   handleJoystick();
   ledUpdateNewData();
   ledUpdateBlinking();
-  boardStatus();
   animateTitle();
+
+  // Lógica principal de tempo para solicitar dados
+  static unsigned long lastCollectionTime = 0;
+  if (millis() - lastCollectionTime >= COLLECTION_INTERVAL_MS) {
+    lastCollectionTime = millis();
+    requestDataFromSlaves();
+  }
+
 }
 
 
@@ -188,6 +197,35 @@ void setupJoy() {
 }
 
 
+
+
+void requestDataFromSlaves() {
+  Serial.println("\n=============================================");
+  Serial.printf("[%s] - Iniciando novo ciclo de coleta de dados.\n", getTimestamp().c_str());
+  Serial.println("=============================================");
+  
+  for (int i = 0; i < TOTAL_SLAVES; i++) {
+    struct_request req;
+    req.command = 1; // Comando para "coletar e enviar dados"
+
+    const uint8_t* slaveMac = slaveMacs[i];
+    esp_err_t result = esp_now_send(slaveMac, (uint8_t *) &req, sizeof(req));
+
+    if (result == ESP_OK) {
+      Serial.printf("--> Solicitacao enviada para o Escravo %d\n", i + 1);
+    } else {
+      char errorMsg[40];
+      snprintf(errorMsg, sizeof(errorMsg), "Erro ao solicitar dados do Escravo %d", i + 1);
+      Serial.println(errorMsg);
+      logErrorDisplay(errorMsg);
+    }
+    delay(300); // Um pequeno intervalo entre as solicitações para não sobrecarregar
+  }
+}
+
+
+
+
 void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
   // Payload extract
   ledNewData();
@@ -223,7 +261,10 @@ void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
   ledNewData();
   ack_message ack = { .id = msg.id, .ok = true };
   esp_err_t result = esp_now_send(info->src_addr, (uint8_t *)&ack, sizeof(ack));
-  if (result != ESP_OK) {
+
+  if (result == ESP_OK) {
+    Serial.printf("    --> ACK de confirmacao enviado para %s\n", macStr);
+  } else {
     char errorMsgACK[32];
     snprintf(errorMsgACK, sizeof(errorMsgACK), "ERROR send ACK S%d", msg.id);
     Serial.printf(errorMsgACK);
@@ -238,26 +279,6 @@ int findSlaveIndex(const uint8_t *mac) {
     if (memcmp(mac, slaveMacs[i], 6) == 0) return i;
   }
   return -1;
-}
-
-
-void boardStatus() {
-  static unsigned long last = 0;
-
-  if (millis() - last > BOARD_STATUS_INTERVAL_MS) {
-    last = millis();
-    Serial.println("--- Board Status ---");
-    for (int i = 0; i < TOTAL_SLAVES; i++) {
-      if (boards[i].id != NODE_ID_UNKNOWN) {
-        Serial.printf("Board %d → V=%.3fV, T=%.3f°C\n",
-                      boards[i].id,
-                      boards[i].voltage,
-                      boards[i].temperature);
-      }
-    }
-
-    Serial.println("-------------------------");
-  }
 }
 
 
@@ -370,3 +391,31 @@ void handleJoystick() {
   }
   prevJs = js;
 }
+
+
+
+// Função auxiliar para converter DateTime para String
+String formatDateTime(DateTime dt) {
+  char buf[20];
+  snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d:%02d",
+           dt.year(), dt.month(), dt.day(),
+           dt.hour(), dt.minute(), dt.second());
+  return String(buf);
+}
+
+// Função auxiliar para calcular tempo decorrido
+String getTimeElapsed(unsigned long lastUpdateMillis) {
+  if (lastUpdateMillis == 0) return "Nunca";
+  
+  unsigned long elapsed = millis() - lastUpdateMillis;
+  unsigned long seconds = elapsed / 1000;
+  unsigned long minutes = seconds / 60;
+  unsigned long hours = minutes / 60;
+  
+  if (hours > 0) {
+    return String(hours) + "h " + String(minutes % 60) + "m";
+  } else if (minutes > 0) {
+    return String(minutes) + "m " + String(seconds % 60) + "s";
+  } else {
+    return String(seconds) + "s atrás";
+  }

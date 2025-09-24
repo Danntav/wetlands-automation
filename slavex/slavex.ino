@@ -7,19 +7,11 @@
 #include <Wire.h>
 #include "LedAnimations.h"
 
-#define uS_TO_S_FACTOR 1000000ULL
-//#define TIME_TO_SLEEP  30*60
-#define TIME_TO_SLEEP  30
+
 #define ACK_TIMEOUT_MS 2000
-//#define MAX_RETRIES 3     //@@implementation for resend payload after ACK NOK
-
-#define BUTTON_PIN_BITMASK(GPIO) (1ULL << GPIO)  // 2 ^ GPIO_NUMBER in hex
-#define USE_EXT0_WAKEUP          0               // 1 = EXT0 wakeup, 0 = EXT1 wakeup
-#define WAKEUP_GPIO              GPIO_NUM_33     // Only RTC IO are allowed
-
+#define MAX_RETRIES 3     //@@implementation for resend payload after ACK NOK
 #define I2C_ADDRESS 0x48  // ADS1115
-
-#define NODE_ID 1
+#define NODE_ID 1   //unique for each Slave[x]
 
 // Master's MAC
 uint8_t masterMacAddress[] = {0x3C, 0x8A, 0x1F, 0x5E, 0x16, 0x48};
@@ -31,23 +23,20 @@ typedef struct struct_message {
   float temperature; 
 } struct_message;
 
-typedef struct {
+typedef struct ack_message {
   int id;
   bool ok;
 } ack_message;
 
-namespace US {
-  const int trig = 26;
-  const int echo = 27;
-  const int limit = 20; // limit level in cm
-}
+// Estrutura para receber a solicitação do Mestre.
+typedef struct struct_request {
+  int command; // Um comando simples, ex: 1 para "coletar e enviar dados"
+} struct_request;
 
 namespace TMP {
   const int tmp_pin = 23;
   bool tmp_found = false;
 }
-
-RTC_DATA_ATTR int bootCount = 0;
 
 volatile bool ackReceived = false;
 
@@ -65,7 +54,6 @@ DeviceAddress tmp_add;
 // Create ADC object
 ADS1115_WE adc(I2C_ADDRESS);
 
-
 void setup() {
   Serial.begin(115200);
    
@@ -73,46 +61,17 @@ void setup() {
   pinMode(LED::red, OUTPUT);
   pinMode(LED::green, OUTPUT);
 
-  // Count boot resets
-  ++bootCount;
-  Serial.println("Boot number: " + String(bootCount));
-
   setupESPNow();
-  configureWakeups();
-
-  esp_sleep_wakeup_cause_t wakeup_reason= esp_sleep_get_wakeup_cause();
-
-  if (wakeup_reason == ESP_SLEEP_WAKEUP_EXT0){
-    Serial.println("Waked up by BTN");
-    checkLevelUntilLimit();
-  } else if (wakeup_reason == ESP_SLEEP_WAKEUP_TIMER){
-    Serial.println("Waked up by RTC");
-    initSensors();
-    measureSensors();
-    sendPayloadAndWaitAck();
-  } else {
-    Serial.println("First Boot");
-  }
   ledTurnOff();
-
-  Serial.println("Going to sleep now");
-  esp_deep_sleep_start();
+  initSensors();
 }
 
 
-void loop() { } // EMPTY
-
-
-void configureWakeups() {
-  // Configure wakeup via button (EXT0)
-  esp_sleep_enable_ext0_wakeup(WAKEUP_GPIO, 1);
-  rtc_gpio_pullup_dis(WAKEUP_GPIO);
-  rtc_gpio_pulldown_en(WAKEUP_GPIO);
-
-  // Configure wakeup source every "TIME_TO_SLEEP" seconds
-  esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
-  Serial.println("Setup ESP32 to sleep for every " + String(TIME_TO_SLEEP) + " Seconds");
-  Serial.flush(); 
+void loop() { 
+  // O loop agora só precisa cuidar de tarefas secundárias, como as animações de LED
+  ledUpdateBlinking();
+  ledUpdateNewData();
+  delay(10);
 }
 
 
@@ -128,7 +87,7 @@ void setupESPNow(){
   
   // Register for Send and Recv CB to get the status of packets
   esp_now_register_send_cb(onDataSent);
-  esp_now_register_recv_cb(onAckRecv);
+  esp_now_register_recv_cb(onDataRecv);
   Serial.println("Successfully init ESP-NOW");
   
   // Register peer
@@ -150,31 +109,67 @@ void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
 }
 
 
-void onAckRecv(const esp_now_recv_info_t *mac, const uint8_t *data, int len) {
-  ack_message *ack = (ack_message *)data;
-  if (ack->id == NODE_ID && ack->ok) {
-    ackReceived = true;
+// NOVO: Função que encapsula a coleta e o envio
+void collectAndSendData() {
+  measureSensors();
+  sendPayloadWithRetries();
+}
+
+
+// MODIFICADO: Callback unificado para receber tanto solicitações quanto ACKs
+void onDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len) {
+  // Se o tamanho dos dados for o de um ACK, trate como um ACK
+  if (len == sizeof(ack_message)) {
+    ack_message ack;
+    memcpy(&ack, incomingData, sizeof(ack));
+    if (ack.id == NODE_ID && ack.ok) {
+      ackReceived = true;
+    }
+  }
+  // Se o tamanho for o de uma solicitação, inicie a coleta
+  else if (len == sizeof(struct_request)) {
+    struct_request req;
+    memcpy(&req, incomingData, sizeof(req));
+
+    // Se o comando for para coletar dados (ex: 1)
+    if (req.command == 1) {
+      Serial.println("Solicitacao do Mestre recebida. Coletando e enviando dados...");
+      collectAndSendData();
+    }
   }
 }
 
-void sendPayloadAndWaitAck() {
-  ackReceived = false;
-  esp_now_send(masterMacAddress, (uint8_t *)&myData, sizeof(myData));
+// Função de envio com lógica de reenvio
+void sendPayloadWithRetries() {
+  bool success = false;
 
-  unsigned long start = millis();
-  while (!ackReceived && millis() - start < ACK_TIMEOUT_MS) {
-    // Wait callback to set ackReceived
-    ledNewData();
-    ledUpdateNewData();
-    ledUpdateBlinking(); 
-    delay(20);
+  for (int i = 0; i < MAX_RETRIES; i++) {
+    ackReceived = false;
+    esp_now_send(masterMacAddress, (uint8_t *)&myData, sizeof(myData));
+
+    unsigned long start = millis();
+    while (!ackReceived && millis() - start < ACK_TIMEOUT_MS) {
+      // Aguarda o callback setar ackReceived = true
+      ledNewData();
+      ledUpdateNewData();
+      delay(20);
+    }
+
+    if (ackReceived) {
+      Serial.println("ACK OK recebido do mestre!");
+      ledAnimationBlinking(LED::green, 5);
+      success = true;
+      break; // Sai do loop se o ACK foi recebido
+    } else {
+      Serial.printf("ACK NOK (timeout). Tentativa %d de %d...\n", i + 1, MAX_RETRIES);
+      ledAnimationBlinking(LED::red, 1);
+    }
   }
-  
-  if (ackReceived) {
-    Serial.println("ACK OK recevied from master");
-    ledAnimationBlinking(LED::green, 10);
-  } else {
-    Serial.println("ACK NOK (timeout)");
+
+  if (!success) {
+    Serial.println("------------------------------------");
+    Serial.println("FALHA AO ENVIAR DADOS APOS 3 TENTATIVAS.");
+    Serial.println("------------------------------------");
     ledAnimationBlinking(LED::red, 10);
   }
 }
@@ -215,14 +210,11 @@ float getVoltage(){
   float voltage = 0.00;
   const int samples = 5;
   float sum = 0.0;
-  
   adc.setCompareChannels(ADS1115_COMP_0_GND);
-
   for (int i = 0; i < samples; i++){
     sum += adc.getResult_V();
     delay(50);
   }
-  
   voltage = sum / samples;
   Serial.print("Pin A0: ");
   Serial.print(voltage, 3);
@@ -236,11 +228,9 @@ float getTemperature(){
   if (!TMP::tmp_found){
     return -127.0;
   }
-  
   const int samples = 5;
   int readings = 0;
   float sum = 0.0;
-
   for (int i = 0; i < samples; i++){
     tmp_sensor.requestTemperatures();
     float tempC = tmp_sensor.getTempC(tmp_add);
@@ -248,47 +238,10 @@ float getTemperature(){
         sum += tempC;
         readings++;
       }
-    
     delay(300);
   }
-
   float average = readings > 0 ? sum / readings : -127.0;
   Serial.printf("Temp average: %.2f°C (%d valid readings)\n", average, readings);
   
   return roundf(average * 100.0) / 100.0;
-}
-
-
-void checkLevelUntilLimit() {
-  const int samples = 5;
-  float distance_cm = 0;
-  pinMode(US::echo, INPUT);
-  pinMode(US::trig, OUTPUT);
-
-  do{
-
-    float sum = 0;
-
-    for (int i = 0; i < samples; i++){
-      digitalWrite(US::trig, LOW);
-      delayMicroseconds(2);
-      digitalWrite(US::trig, HIGH);
-      delayMicroseconds(10);
-      digitalWrite(US::trig, LOW);
-
-      long duration = pulseIn(US::echo, HIGH, 30000); // timeout 30 ms
-      float us_read = duration * 0.0343 / 2;
-
-      sum += us_read;
-      delay(50);
-    }
-
-    distance_cm = sum / samples;
-    
-    Serial.printf("Level: %.1f cm\n", distance_cm);
-    ledAnimationSnake();
-    delay(100);
-  } while (distance_cm > US::limit);
-  
-  ledAnimationBlinking(LED::green, 20);
 }

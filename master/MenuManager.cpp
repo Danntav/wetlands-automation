@@ -16,6 +16,8 @@ int titleAnimIndex = 0;
 static bool lastFrameCleared = false;
 const char* title = "YARA WETLANDS";
 
+// Nova variável para controlar a opção selecionada na tela de errors
+int errorMenuOption = 0; // 0 = Voltar, 1 = Clear Errors
 
 bool beginDisplayOperation() {
   digitalWrite(SD_CS, HIGH);
@@ -37,7 +39,6 @@ void endDisplayOperation() {
   digitalWrite(TFT_CS, HIGH);
   SPI.end();
 }
-
 
 void initMenu(Adafruit_ST7735* display) {
   if (!display) {
@@ -63,10 +64,10 @@ void updateMenu(bool left, bool right, bool up, bool down, bool click) {
   switch (currentState) {
     case MENU_MAIN:
       if (up) {
-        selectedOption = (selectedOption + 2) % 3;  // navigation up
+        selectedOption = (selectedOption + 1) % 2;  // Agora só temos 2 opções
         drawMenu();
       } else if (down) {
-        selectedOption = (selectedOption + 1) % 3;  // navigation down
+        selectedOption = (selectedOption + 1) % 2;  // navigation down
         drawMenu();
       }
 
@@ -77,10 +78,8 @@ void updateMenu(bool left, bool right, bool up, bool down, bool click) {
           drawBoardStatus();
         } else if (selectedOption == 1) {
           currentState = MENU_ERROR_LIST;
+          errorMenuOption = 0; // Reset para "Voltar"
           drawErrorList();
-        } else if (selectedOption == 2) {
-          clearErrors();
-          drawMenu();
         }
       }
       break;
@@ -104,12 +103,25 @@ void updateMenu(bool left, bool right, bool up, bool down, bool click) {
       break;
 
     case MENU_ERROR_LIST:
-      if (click) {
-        currentState = MENU_MAIN;
-        titleAnimIndex = 0; // Reinicia animação
-        lastFrameCleared = false;
-        tft->fillScreen(ST77XX_BLACK);
-        drawMenu();
+      if (left) {
+        errorMenuOption = (errorMenuOption + 1) % 2; // Alterna entre Voltar e Clear
+        drawErrorList();
+      } else if (right) {
+        errorMenuOption = (errorMenuOption + 1) % 2; // Alterna entre Voltar e Clear
+        drawErrorList();
+      } else if (click) {
+        if (errorMenuOption == 0) {
+          // Voltar
+          currentState = MENU_MAIN;
+          titleAnimIndex = 0;
+          lastFrameCleared = false;
+          tft->fillScreen(ST77XX_BLACK);
+          drawMenu();
+        } else {
+          // Clear Errors - limpa diretamente sem mostrar mensagem
+          clearErrors();
+          drawErrorList(); // Redesenha a lista vazia
+        }
       }
       break;
   }
@@ -124,7 +136,7 @@ void drawMenu() {
   tft->setCursor(10, 30);
   tft->print("--- MENU ---");
 
-  const char* options[] = { "Board Status", "Last Errors", "Clear Errors" };
+  const char* options[] = { "Board Status", "Last Errors" };
   const int count = sizeof(options) / sizeof(options[0]);
 
   for (int i = 0; i < count; i++) {
@@ -186,7 +198,6 @@ void drawBoardStatus() {
   endDisplayOperation();
 }
 
-
 void drawErrorList() {
   if (!beginDisplayOperation()) return;
   tft->fillScreen(ST77XX_BLACK);
@@ -198,34 +209,51 @@ void drawErrorList() {
   tft->setTextSize(1);
   tft->setTextColor(ST77XX_WHITE);
   int y = 30;
-  for (int i = 0; i < errorCount && y < 120; i++) {
+  
+  if (errorCount == 0) {
     tft->setCursor(10, y);
-    tft->print(errorMsgs[i]);
-    y += 18;
+    tft->print("Nenhum erro registrado");
+  } else {
+    for (int i = 0; i < errorCount && y < 95; i++) { // Mudei para 95 para dar espaço para as opções
+      tft->setCursor(10, y);
+      tft->print(errorMsgs[i]);
+      y += 18;
+    }
   }
   
-  tft->setTextColor(ST77XX_WHITE);
-  tft->setCursor(10, 115);
+  // Desenha as opções na parte inferior
+  tft->setTextSize(1);
+  
+  // Opção "Voltar"
+  if (errorMenuOption == 0) {
+    tft->fillRect(5, 105, 70, 12, ST77XX_WHITE);
+    tft->setTextColor(ST77XX_BLACK, ST77XX_WHITE);
+  } else {
+    tft->setTextColor(ST77XX_WHITE);
+  }
+  tft->setCursor(10, 107);
   tft->print("< Voltar");
+  
+  // Opção "Clear Errors"
+  if (errorMenuOption == 1) {
+    tft->fillRect(85, 105, 70, 12, ST77XX_WHITE);
+    tft->setTextColor(ST77XX_BLACK, ST77XX_WHITE);
+  } else {
+    tft->setTextColor(ST77XX_WHITE);
+  }
+  tft->setCursor(90, 107);
+  tft->print("Clear >");
+  
   endDisplayOperation();
 }
-
 
 void clearErrors() {
   for (int i = 0; i < errorCount; i++) {
     errorMsgs[i] = "";
   }
   errorCount = 0;
-  if (!beginDisplayOperation()) return;
-  tft->fillScreen(ST77XX_BLACK);
-  tft->setTextColor(ST77XX_WHITE);
-  tft->setCursor(40, 60);
-  tft->print("CLEARED!");
-  endDisplayOperation();
-  delay(1000);
-  drawMenu();
+  // Removida a exibição de "CLEARED!" - apenas limpa silenciosamente
 }
-
 
 void animateTitle() {
   if (currentState != MENU_MAIN) return;

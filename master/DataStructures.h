@@ -39,6 +39,10 @@ typedef struct ack_message {
   bool ok;
 } ack_message;
 
+typedef struct struct_request {
+  int command; //  1 para "coletar e enviar dados"
+} struct_request;
+
 struct JoystickState {
   bool left = false;
   bool right = false;
