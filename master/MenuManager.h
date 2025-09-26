@@ -12,7 +12,7 @@ enum MenuState {
   MENU_MAIN,
   MENU_BOARD_STATUS,
   MENU_ERROR_LIST,
-  MENU_CLEAR_ERRORS
+  MENU_ALARM_LIST
 };
 
 extern MenuState currentState;
@@ -37,5 +37,7 @@ void clearErrors();
 void animateTitle();
 bool beginDisplayOperation();
 void endDisplayOperation();
+String getTimeElapsed(int boardIndex);
+void drawAlarmList();
 
 #endif

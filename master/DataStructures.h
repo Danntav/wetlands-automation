@@ -26,6 +26,13 @@
 #define TOTAL_SLAVES 9
 #define MAX_ERRORS 10
 
+#define MAX_ALARMS 15
+#define VOLTAGE_MIN 0
+#define VOLTAGE_MAX 50
+#define TEMP_MIN 0
+#define TEMP_MAX 80
+//#define COMM_TIMEOUT_MS 10L*60UL*1000UL
+#define COMM_TIMEOUT_MS 60UL*1000UL
 // Structs
 typedef struct struct_message {
   int id;
@@ -50,5 +57,12 @@ struct JoystickState {
   bool down = false;
   bool click = false;
 };
+
+extern String boardLastUpdate[TOTAL_SLAVES];  // Timestamp da última atualização
+extern unsigned long boardLastUpdateMillis[TOTAL_SLAVES];
+extern String alarmMsgs[MAX_ALARMS];
+extern int alarmCount;
+extern bool hasActiveAlarms;
+extern int alarmMenuOption;
 
 #endif // DATA_STRUCTURE_H

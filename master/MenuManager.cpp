@@ -8,15 +8,22 @@ extern struct_message boards[TOTAL_SLAVES];
 extern String getTimestamp();
 extern String errorMsgs[MAX_ERRORS];
 extern int errorCount;
+extern String boardLastUpdate[TOTAL_SLAVES];           // NOVA
+extern unsigned long boardLastUpdateMillis[TOTAL_SLAVES]; // NOVA
+extern String alarmMsgs[MAX_ALARMS];
+extern int alarmCount;
+extern bool hasActiveAlarms;
+extern int alarmMenuOption;
+extern void clearAlarms();
 
 static Adafruit_ST7735* tft;
 
 unsigned long lastAnimTime = 0;
 int titleAnimIndex = 0;
 static bool lastFrameCleared = false;
-const char* title = "YARA WETLANDS";
+const char* title = "YARA WETLANDS   ";
 
-// Nova variável para controlar a opção selecionada na tela de errors
+// Controla a opção selecionada na tela de errors
 int errorMenuOption = 0; // 0 = Voltar, 1 = Clear Errors
 
 bool beginDisplayOperation() {
@@ -64,10 +71,10 @@ void updateMenu(bool left, bool right, bool up, bool down, bool click) {
   switch (currentState) {
     case MENU_MAIN:
       if (up) {
-        selectedOption = (selectedOption + 1) % 2;  // Agora só temos 2 opções
+        selectedOption = (selectedOption + 2) % 3;
         drawMenu();
       } else if (down) {
-        selectedOption = (selectedOption + 1) % 2;  // navigation down
+        selectedOption = (selectedOption + 1) % 3; 
         drawMenu();
       }
 
@@ -80,6 +87,10 @@ void updateMenu(bool left, bool right, bool up, bool down, bool click) {
           currentState = MENU_ERROR_LIST;
           errorMenuOption = 0; // Reset para "Voltar"
           drawErrorList();
+        } else if (selectedOption == 2) {
+          currentState = MENU_ALARM_LIST;
+          alarmMenuOption = 0;
+          drawAlarmList();
         }
       }
       break;
@@ -118,9 +129,32 @@ void updateMenu(bool left, bool right, bool up, bool down, bool click) {
           tft->fillScreen(ST77XX_BLACK);
           drawMenu();
         } else {
-          // Clear Errors - limpa diretamente sem mostrar mensagem
           clearErrors();
-          drawErrorList(); // Redesenha a lista vazia
+          drawErrorList();
+          Serial.println("Cleared Errors");
+        }
+      }
+      break;
+
+    case MENU_ALARM_LIST:
+      if (left) {
+        alarmMenuOption = (alarmMenuOption + 1) % 2;
+        drawAlarmList();
+      } else if (right) {
+        alarmMenuOption = (alarmMenuOption + 1) % 2;
+        drawAlarmList();
+      } else if (click) {
+        if (alarmMenuOption == 0) {
+          // Voltar
+          currentState = MENU_MAIN;
+          titleAnimIndex = 0;
+          lastFrameCleared = false;
+          tft->fillScreen(ST77XX_BLACK);
+          drawMenu();
+        } else {
+          // Clear Alarms
+          clearAlarms();
+          drawAlarmList();
         }
       }
       break;
@@ -136,16 +170,35 @@ void drawMenu() {
   tft->setCursor(10, 30);
   tft->print("--- MENU ---");
 
-  const char* options[] = { "Board Status", "Last Errors" };
+  const char* options[] = { "Board Status", "Last Errors", "Alarmes" };
   const int count = sizeof(options) / sizeof(options[0]);
 
   for (int i = 0; i < count; i++) {
-    tft->fillRect(10, 60 + i * 20, 140, 16, i == selectedOption ? ST77XX_WHITE : ST77XX_BLACK);
-    if (i == selectedOption) {
-      tft->setTextColor(ST77XX_BLACK, ST77XX_WHITE);  // inverted highlight
+    tft->fillRect(5, 60 + i * 20, 150, 16, i == selectedOption ? ST77XX_WHITE : ST77XX_BLACK);
+    
+    // Efeito piscante para "Alarmes" se houver alarmes ativos
+    if (i == 2 && hasActiveAlarms) { // Item "Alarmes"
+      static bool blinkState = false;
+      static unsigned long lastBlink = 0;
+      if (millis() - lastBlink > 500) { // Pisca a cada 500ms
+        blinkState = !blinkState;
+        lastBlink = millis();
+      }
+      
+      if (i == selectedOption) {
+        tft->setTextColor(ST77XX_BLACK, blinkState ? ST77XX_RED : ST77XX_WHITE);
+      } else {
+        tft->setTextColor(blinkState ? ST77XX_RED : ST77XX_WHITE);
+      }
     } else {
-      tft->setTextColor(ST77XX_WHITE);
+      // Comportamento normal para outros itens
+      if (i == selectedOption) {
+        tft->setTextColor(ST77XX_BLACK, ST77XX_WHITE);
+      } else {
+        tft->setTextColor(ST77XX_WHITE);
+      }
     }
+    
     tft->setCursor(10, 60 + i * 20);
     tft->print(options[i]);
   }
@@ -168,23 +221,47 @@ void drawBoardStatus() {
   } else {
     tft->printf("Board %d", board.id);
   }
+  //Timestamp from last packet
+  tft->setTextSize(1);
+  tft->setCursor(10, 35);
+  tft->setTextColor(ST77XX_CYAN);
+  tft->print("Ultima coleta:");
+  
+  tft->setCursor(10, 55);
+  if (boardLastUpdateMillis[currentBoardIndex] == 0) {
+    tft->setTextColor(ST77XX_RED);
+    tft->print("Nenhum dado recebido");
+  } else {
+    tft->setTextColor(ST77XX_WHITE);
+    // Mostra apenas a parte do tempo (HH:MM:SS) para economizar espaço
+    String fullTimestamp = boardLastUpdate[currentBoardIndex];
+    String timeOnly = fullTimestamp.substring(11); // Pega só "HH:MM:SS"
+    tft->print(timeOnly);
+    
+    // Linha adicional com tempo decorrido
+    tft->setCursor(10, 55);
+    tft->setTextColor(ST77XX_YELLOW);
+    tft->print("(");
+    tft->print(getTimeElapsed(currentBoardIndex));
+    tft->print(")");
+  }
 
   tft->setTextSize(1);
-  tft->setCursor(10, 40);
+  tft->setCursor(10, 45);
   tft->setTextColor(ST77XX_CYAN);
   tft->print("TS: ");
   tft->print(getTimestamp());
 
   tft->setTextSize(2);
   tft->setTextColor(ST77XX_GREEN);
-  tft->setCursor(10, 60);
+  tft->setCursor(10, 65);
   if (board.id == 0) {
     tft->print("V: --- V");
   } else {
     tft->printf("V: %.3f V", board.voltage);
   }
 
-  tft->setCursor(10, 80);
+  tft->setCursor(10, 85);
   if (board.id == 0) {
     tft->print("T: --- C");
   } else {
@@ -242,8 +319,7 @@ void drawErrorList() {
     tft->setTextColor(ST77XX_WHITE);
   }
   tft->setCursor(90, 107);
-  tft->print("Clear >");
-  
+  tft->print("Limpar >");  
   endDisplayOperation();
 }
 
@@ -252,14 +328,13 @@ void clearErrors() {
     errorMsgs[i] = "";
   }
   errorCount = 0;
-  // Removida a exibição de "CLEARED!" - apenas limpa silenciosamente
 }
 
 void animateTitle() {
   if (currentState != MENU_MAIN) return;
   if (!beginDisplayOperation()) return;
   unsigned long now = millis();
-  if (now - lastAnimTime > 200) {
+  if (now - lastAnimTime > 300) {
     lastAnimTime = now;
     if (!lastFrameCleared) {
       tft->fillRect(0, 0, 160, 30, ST77XX_BLACK);
@@ -275,5 +350,103 @@ void animateTitle() {
       lastFrameCleared = false;
     }
   }
+  endDisplayOperation();
+}
+
+
+String getTimeElapsed(int boardIndex) {
+  if (boardLastUpdateMillis[boardIndex] == 0) {
+    return "Never";
+  }
+  
+  unsigned long elapsed = millis() - boardLastUpdateMillis[boardIndex];
+  unsigned long seconds = elapsed / 1000;
+  unsigned long minutes = seconds / 60;
+  unsigned long hours = minutes / 60;
+  
+  if (hours > 0) {
+    return String(hours) + "h " + String(minutes % 60) + "m";
+  } else if (minutes > 0) {
+    return String(minutes) + "m " + String(seconds % 60) + "s";
+  } else {
+    return String(seconds) + "s atras";
+  }
+}
+
+
+
+void drawAlarmList() {
+  if (!beginDisplayOperation()) return;
+  
+  // Fundo piscante se houver alarmes
+  if (hasActiveAlarms) {
+    static bool backgroundBlink = false;
+    static unsigned long lastBackgroundBlink = 0;
+    if (millis() - lastBackgroundBlink > 800) { // Pisca mais devagar
+      backgroundBlink = !backgroundBlink;
+      lastBackgroundBlink = millis();
+    }
+    tft->fillScreen(backgroundBlink ? ST77XX_BLACK : 0x1800); // Vermelho bem escuro
+  } else {
+    tft->fillScreen(ST77XX_BLACK);
+  }
+  
+  tft->setTextSize(2);
+  tft->setTextColor(ST77XX_RED);
+  tft->setCursor(10, 10);
+  tft->print("ALARMES:");
+
+  tft->setTextSize(1);
+  tft->setTextColor(ST77XX_WHITE);
+  int y = 30;
+  
+  if (alarmCount == 0) {
+    tft->setCursor(10, y);
+    tft->setTextColor(ST77XX_GREEN);
+    tft->print("Sistema OK");
+    tft->setCursor(10, y + 12);
+    tft->print("Nenhum alarme ativo");
+  } else {
+    for (int i = 0; i < alarmCount && y < 95; i++) {
+      tft->setCursor(5, y); // Margem menor para aproveitar espaço
+      tft->setTextColor(ST77XX_YELLOW);
+      
+      // Mostra apenas as últimas linhas do alarme para caber na tela
+      String alarm = alarmMsgs[i];
+      if (alarm.length() > 25) {
+        // Pega apenas a parte da mensagem, sem o timestamp completo
+        int spacePos = alarm.indexOf(' ', 20); // Encontra espaço após timestamp
+        if (spacePos > 0) {
+          alarm = alarm.substring(spacePos + 1);
+        }
+      }
+      tft->print(alarm);
+      y += 12; // Espaçamento menor para caber mais
+    }
+  }
+  
+  // Opções na parte inferior
+  tft->setTextSize(1);
+  
+  // Opção "Voltar"
+  if (alarmMenuOption == 0) {
+    tft->fillRect(5, 105, 70, 12, ST77XX_WHITE);
+    tft->setTextColor(ST77XX_BLACK, ST77XX_WHITE);
+  } else {
+    tft->setTextColor(ST77XX_WHITE);
+  }
+  tft->setCursor(10, 107);
+  tft->print("< Voltar");
+  
+  // Opção "Clear Alarms"
+  if (alarmMenuOption == 1) {
+    tft->fillRect(85, 105, 70, 12, ST77XX_WHITE);
+    tft->setTextColor(ST77XX_BLACK, ST77XX_WHITE);
+  } else {
+    tft->setTextColor(ST77XX_WHITE);
+  }
+  tft->setCursor(90, 107);
+  tft->print("Limpar >");
+  
   endDisplayOperation();
 }

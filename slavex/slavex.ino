@@ -6,12 +6,13 @@
 #include <ADS1115_WE.h>
 #include <Wire.h>
 #include "LedAnimations.h"
+#include "esp_task_wdt.h"
 
 
 #define ACK_TIMEOUT_MS 2000
 #define MAX_RETRIES 3     //@@implementation for resend payload after ACK NOK
 #define I2C_ADDRESS 0x48  // ADS1115
-#define NODE_ID 1   //unique for each Slave[x]
+#define NODE_ID 8   //unique for each Slave[x]
 
 // Master's MAC
 uint8_t masterMacAddress[] = {0x3C, 0x8A, 0x1F, 0x5E, 0x16, 0x48};
@@ -64,14 +65,26 @@ void setup() {
   setupESPNow();
   ledTurnOff();
   initSensors();
+  esp_task_wdt_init(60);
+  esp_task_wdt_add(NULL);
 }
 
 
 void loop() { 
   // O loop agora só precisa cuidar de tarefas secundárias, como as animações de LED
+  esp_task_wdt_reset();
   ledUpdateBlinking();
   ledUpdateNewData();
   delay(10);
+  // Verificar se ESP-NOW ainda está ativo
+  static unsigned long lastHealthCheck = 0;
+  if (millis() - lastHealthCheck > 30000) { // A cada 30s
+    if (WiFi.getMode() != WIFI_STA) {
+      Serial.println("WiFi mode changed! Reinitializing...");
+      setupESPNow();
+    }
+    lastHealthCheck = millis();
+  }
 }
 
 
@@ -102,8 +115,8 @@ void setupESPNow(){
   }
 }
 
-// callback when data is sent
-void onDataSent(const uint8_t *mac_addr, esp_now_send_status_t status) {
+// UPDATED: callback when data is sent - new signature for ESP32 core v3.x
+void onDataSent(const wifi_tx_info_t *tx_info, esp_now_send_status_t status) {
   Serial.print("\r\nLast Packet Send Status: ");
   Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery FAIL");
 }
@@ -116,8 +129,8 @@ void collectAndSendData() {
 }
 
 
-// MODIFICADO: Callback unificado para receber tanto solicitações quanto ACKs
-void onDataRecv(const uint8_t *mac_addr, const uint8_t *incomingData, int len) {
+// UPDATED: Callback unificado para receber tanto solicitações quanto ACKs - new signature
+void onDataRecv(const esp_now_recv_info *recv_info, const uint8_t *incomingData, int len) {
   // Se o tamanho dos dados for o de um ACK, trate como um ACK
   if (len == sizeof(ack_message)) {
     ack_message ack;
@@ -244,4 +257,13 @@ float getTemperature(){
   Serial.printf("Temp average: %.2f°C (%d valid readings)\n", average, readings);
   
   return roundf(average * 100.0) / 100.0;
+}
+
+void logStatus() {
+  Serial.println("=== SLAVE STATUS ===");
+  Serial.printf("Node ID: %d\n", NODE_ID);
+  Serial.printf("WiFi Mode: %d\n", WiFi.getMode());
+  Serial.printf("Free Heap: %d\n", ESP.getFreeHeap());
+  Serial.printf("Uptime: %lu ms\n", millis());
+  Serial.println("==================");
 }

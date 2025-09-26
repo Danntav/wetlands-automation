@@ -12,6 +12,14 @@
 #define COLLECTION_INTERVAL_MS (5UL * 60UL * 1000UL)  // 5 min
 #define NODE_ID_UNKNOWN 0
 
+String boardLastUpdate[TOTAL_SLAVES];
+unsigned long boardLastUpdateMillis[TOTAL_SLAVES];
+
+String alarmMsgs[MAX_ALARMS];
+int alarmCount = 0;
+bool hasActiveAlarms = false;
+int alarmMenuOption = 0;
+
 // Map all slave's MAC
 const uint8_t slaveMacs[TOTAL_SLAVES][6] = {
   { 0x00, 0x4B, 0x12, 0x21, 0x32, 0xA8 },  // Slave 1
@@ -84,10 +92,12 @@ void setup() {
   
   Serial.begin(115200);
   delay(1500);
+
   ledTurnOff();
   setupLeds();
   setupDisplay();
   delay(1500);
+
   setupRTC();
   delay(1000);
 
@@ -95,7 +105,17 @@ void setup() {
     boards[i].id = NODE_ID_UNKNOWN;
     boards[i].voltage = 0.0;
     boards[i].temperature = 0.0;
+    boardLastUpdate[i] = "Never";
+    boardLastUpdateMillis[i] = 0;
   }
+
+  for (int i = 0; i < MAX_ALARMS; i++) {
+    alarmMsgs[i] = "";
+  }
+  alarmCount = 0;
+  hasActiveAlarms = false;
+  alarmMenuOption = 0;
+
   setupESPNow();
   delay(1000);
   setupJoy();
@@ -106,6 +126,7 @@ void loop() {
   ledUpdateNewData();
   ledUpdateBlinking();
   animateTitle();
+  checkCommunicationAlarms();
 
   // Lógica principal de tempo para solicitar dados
   static unsigned long lastCollectionTime = 0;
@@ -113,7 +134,6 @@ void loop() {
     lastCollectionTime = millis();
     requestDataFromSlaves();
   }
-
 }
 
 
@@ -224,8 +244,6 @@ void requestDataFromSlaves() {
 }
 
 
-
-
 void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
   // Payload extract
   ledNewData();
@@ -237,6 +255,14 @@ void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
   int idx = msg.id - 1;
   if (idx < 0 || idx >= TOTAL_SLAVES) return;
   boards[idx] = msg;
+
+  //Register timestamp upon packet received
+  DateTime now = rtc.now();
+  boardLastUpdate[idx] = getTimestamp();
+  boardLastUpdateMillis[idx] = millis();
+
+  //Verificação de alarmes
+  checkForAlarms(msg, idx);
 
   // Save msg on SD
   logToSD(msg);
@@ -270,6 +296,7 @@ void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
     Serial.printf(errorMsgACK);
     logErrorDisplay(errorMsgACK);
     ledAnimationBlinking(LED::red, 20);
+    addAlarm("Falha ACK Board " + String(msg.id));
   }
 }
 
@@ -392,8 +419,6 @@ void handleJoystick() {
   prevJs = js;
 }
 
-
-
 // Função auxiliar para converter DateTime para String
 String formatDateTime(DateTime dt) {
   char buf[20];
@@ -403,19 +428,78 @@ String formatDateTime(DateTime dt) {
   return String(buf);
 }
 
-// Função auxiliar para calcular tempo decorrido
-String getTimeElapsed(unsigned long lastUpdateMillis) {
-  if (lastUpdateMillis == 0) return "Nunca";
+
+// Função para adicionar alarme
+void addAlarm(String message) {
+  String timestamp = getTimestamp();
+  String fullAlarmMsg = timestamp + " " + message;
   
-  unsigned long elapsed = millis() - lastUpdateMillis;
-  unsigned long seconds = elapsed / 1000;
-  unsigned long minutes = seconds / 60;
-  unsigned long hours = minutes / 60;
-  
-  if (hours > 0) {
-    return String(hours) + "h " + String(minutes % 60) + "m";
-  } else if (minutes > 0) {
-    return String(minutes) + "m " + String(seconds % 60) + "s";
+  if (alarmCount < MAX_ALARMS) {
+    alarmMsgs[alarmCount++] = fullAlarmMsg;
   } else {
-    return String(seconds) + "s atrás";
+    // Remove o mais antigo e adiciona o novo
+    for (int i = 1; i < MAX_ALARMS; i++) {
+      alarmMsgs[i - 1] = alarmMsgs[i];
+    }
+    alarmMsgs[MAX_ALARMS - 1] = fullAlarmMsg;
   }
+  
+  hasActiveAlarms = true;
+  Serial.println("ALARME: " + message);
+  
+  // Ativa LED vermelho piscando
+  ledAnimationBlinking(LED::red, 50); // 50 piscadas para alarme
+}
+
+// Função para limpar alarmes
+void clearAlarms() {
+  for (int i = 0; i < alarmCount; i++) {
+    alarmMsgs[i] = "";
+  }
+  alarmCount = 0;
+  hasActiveAlarms = false;
+  Serial.println("Alarmes limpos");
+}
+
+// Função para verificar alarmes nos dados recebidos
+void checkForAlarms(const struct_message &msg, int boardIndex) {
+  char alarmMsg[80];
+  
+  // Verifica voltagem
+  if (msg.voltage < VOLTAGE_MIN || msg.voltage > VOLTAGE_MAX) {
+    snprintf(alarmMsg, sizeof(alarmMsg), "Board %d: Voltagem anormal %.2fV", msg.id, msg.voltage);
+    addAlarm(String(alarmMsg));
+  }
+  
+  // Verifica temperatura
+  if (msg.temperature < TEMP_MIN || msg.temperature > TEMP_MAX) {
+    snprintf(alarmMsg, sizeof(alarmMsg), "Board %d: Temperatura anormal %.1f°C", msg.id, msg.temperature);
+    addAlarm(String(alarmMsg));
+  }
+  
+  // Verifica valores inválidos típicos de sensores com problema
+  if (msg.voltage <= 0 || msg.temperature <= -100) {
+    snprintf(alarmMsg, sizeof(alarmMsg), "Board %d: Sensor com falha (V=%.2f T=%.1f)", msg.id, msg.voltage, msg.temperature);
+    addAlarm(String(alarmMsg));
+  }
+}
+
+// Função para verificar timeouts de comunicação
+void checkCommunicationAlarms() {
+  static unsigned long lastCommCheck = 0;
+  if (millis() - lastCommCheck < 60000) return; // Verifica apenas a cada minuto
+  lastCommCheck = millis();
+  
+  for (int i = 0; i < TOTAL_SLAVES; i++) {
+    if (boardLastUpdateMillis[i] > 0) {  // Só verifica se já recebeu dados antes
+      unsigned long timeSinceUpdate = millis() - boardLastUpdateMillis[i];
+      if (timeSinceUpdate > COMM_TIMEOUT_MS) {
+        char alarmMsg[60];
+        snprintf(alarmMsg, sizeof(alarmMsg), "Board %d: Sem comunicacao %lu min", 
+                i + 1, timeSinceUpdate / 60000);
+        addAlarm(String(alarmMsg));
+      }
+    }
+  }
+}
+
