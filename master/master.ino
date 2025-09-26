@@ -9,7 +9,8 @@
 #include "MenuManager.h"
 #include "DataStructures.h"
 
-#define COLLECTION_INTERVAL_MS (5UL * 60UL * 1000UL)  // 5 min
+//#define COLLECTION_INTERVAL_MS (5UL * 60UL * 1000UL)  // 5 min
+#define COLLECTION_INTERVAL_MS (60UL * 1000UL)
 #define NODE_ID_UNKNOWN 0
 
 String boardLastUpdate[TOTAL_SLAVES];
@@ -95,7 +96,7 @@ void setup() {
 
   ledTurnOff();
   setupLeds();
-  setupDisplay();
+  //setupDisplay();
   delay(1500);
 
   setupRTC();
@@ -122,10 +123,11 @@ void setup() {
 }
 
 void loop() {
-  handleJoystick();
+  //handleJoystick();
   ledUpdateNewData();
   ledUpdateBlinking();
-  animateTitle();
+  updateAlarmLed();
+  //animateTitle();
   checkCommunicationAlarms();
 
   // Lógica principal de tempo para solicitar dados
@@ -244,7 +246,62 @@ void requestDataFromSlaves() {
 }
 
 
-void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
+
+void onDataRecv(const esp_now_recv_info *info, const uint8_t *data, int len) {
+  Serial.println("\n=== PACOTE RECEBIDO ===");
+  
+  // Verificações básicas
+  if (!info || !data || len != sizeof(struct_message)) {
+    Serial.printf("✗ Pacote inválido (len=%d, esperado=%d)\n", len, sizeof(struct_message));
+    return;
+  }
+  
+  struct_message msg;
+  memcpy(&msg, data, sizeof(msg));
+  
+  // Verifica ID válido
+  if (msg.id <= 0 || msg.id > TOTAL_SLAVES) {
+    Serial.printf("✗ ID inválido: %d\n", msg.id);
+    return;
+  }
+  
+  int idx = msg.id - 1;
+  
+  Serial.printf("✓ Dados recebidos do Slave %d:\n", msg.id);
+  Serial.printf("  Voltagem: %.2fV\n", msg.voltage);
+  Serial.printf("  Temperatura: %.2f°C\n", msg.temperature);
+  
+  // Atualiza dados (SEM duplicata por agora)
+  boards[idx] = msg;
+  boardLastUpdate[idx] = getTimestamp();
+  boardLastUpdateMillis[idx] = millis();
+  
+  // Verifica alarmes
+  checkForAlarms(msg, idx);
+  
+  // ENVIA ACK IMEDIATAMENTE
+  Serial.println("Enviando ACK...");
+  
+  ack_message ack;
+  ack.id = msg.id;
+  ack.ok = true;
+  
+  esp_err_t result = esp_now_send(info->src_addr, (uint8_t *)&ack, sizeof(ack));
+  
+  if (result == ESP_OK) {
+    Serial.printf("✓ ACK enviado para Slave %d\n", msg.id);
+  } else {
+    Serial.printf("✗ ERRO ao enviar ACK: %d\n", result);
+  }
+  
+  Serial.println("======================");
+}
+
+
+
+
+/*
+void onDataRecv(const esp_now_recv_info *info, const uint8_t *data, int len) {
   // Payload extract
   ledNewData();
   if (len != sizeof(struct_message)) return;  // sanity check
@@ -254,8 +311,15 @@ void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
   // Identifies slave by ID
   int idx = msg.id - 1;
   if (idx < 0 || idx >= TOTAL_SLAVES) return;
-  boards[idx] = msg;
 
+  static unsigned long lastProcessTime[TOTAL_SLAVES] = {0};
+  if (millis() - lastProcessTime[idx] < 1000) { // Ignora se já processou há menos de 1s
+    Serial.printf("Ignorando mensagem duplicada do Slave %d\n", msg.id);
+    return;
+  }
+  lastProcessTime[idx] = millis();
+
+  boards[idx] = msg;
   //Register timestamp upon packet received
   DateTime now = rtc.now();
   boardLastUpdate[idx] = getTimestamp();
@@ -283,13 +347,14 @@ void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
                 info->src_addr[3], info->src_addr[4], info->src_addr[5],
                 msg.id, msg.voltage, msg.temperature);
 
-  // Send ACK back
+      // Send ACK back
   ledNewData();
   ack_message ack = { .id = msg.id, .ok = true };
   esp_err_t result = esp_now_send(info->src_addr, (uint8_t *)&ack, sizeof(ack));
 
+
   if (result == ESP_OK) {
-    Serial.printf("    --> ACK de confirmacao enviado para %s\n", macStr);
+    Serial.printf("    --> ACK de confirmacao enviado para %s (ID=%d)\n", macStr, msg.id);
   } else {
     char errorMsgACK[32];
     snprintf(errorMsgACK, sizeof(errorMsgACK), "ERROR send ACK S%d", msg.id);
@@ -299,7 +364,7 @@ void onDataRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
     addAlarm("Falha ACK Board " + String(msg.id));
   }
 }
-
+*/
 
 int findSlaveIndex(const uint8_t *mac) {
   for (int i = 0; i < TOTAL_SLAVES; i++) {
@@ -310,39 +375,36 @@ int findSlaveIndex(const uint8_t *mac) {
 
 
 void logToSD(const struct_message &msg) {
+  static bool sdError = false;
+  if (sdError) return; // Se já falhou, não tenta mais até reset
+  
   digitalWrite(TFT_CS, HIGH);
   digitalWrite(SD_CS, HIGH);
   SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
-  delay(200);
+  delay(100); // Reduzido de 200ms
   digitalWrite(SD_CS, LOW);
-  Serial.println("Initializing SD...");
-  sdInitialized = SD.begin(SD_CS);
-  if (!sdInitialized) {
-    Serial.println("ERROR init SD!");
-    digitalWrite(TFT_CS, LOW);
-    logErrorDisplay("ERROR init SD!");
-    digitalWrite(TFT_CS, HIGH);
-    ledAnimationBlinking(LED::red, 20);
+  
+  if (!SD.begin(SD_CS)) {
+    Serial.println("SD failed - disabling until reset");
+    sdError = true;
     digitalWrite(SD_CS, HIGH);
     SPI.end();
     return;
   }
-  Serial.println("SD initialized successfully");
+  
   File sdFile = SD.open(SD_FILE, FILE_APPEND);
   if (!sdFile) {
-    Serial.println("ERROR: file didn't open!");
-    digitalWrite(TFT_CS, LOW);
-    logErrorDisplay("ERROR: file didn't open!");
-    digitalWrite(TFT_CS, HIGH);
-    ledAnimationBlinking(LED::red, 20);
+    Serial.println("SD file failed - disabling until reset");
+    sdError = true;
     digitalWrite(SD_CS, HIGH);
     SPI.end();
     return;
   }
+  
   String timestamp = getTimestamp();
   sdFile.printf("%s,%d,%.2f,%.2f\n", timestamp.c_str(), msg.id, msg.voltage, msg.temperature);
   sdFile.close();
-  Serial.println("Data written to SD");
+  
   digitalWrite(SD_CS, HIGH);
   SPI.end();
 }
@@ -448,7 +510,7 @@ void addAlarm(String message) {
   Serial.println("ALARME: " + message);
   
   // Ativa LED vermelho piscando
-  ledAnimationBlinking(LED::red, 50); // 50 piscadas para alarme
+  //ledAnimationBlinking(LED::red, 50); // 50 piscadas para alarme
 }
 
 // Função para limpar alarmes
@@ -503,3 +565,60 @@ void checkCommunicationAlarms() {
   }
 }
 
+
+String getSlaveStatus(int slaveId) {
+  int idx = slaveId - 1;
+  if (idx < 0 || idx >= TOTAL_SLAVES) return "";
+  
+  String status = "";
+  struct_message board = boards[idx];
+  
+  // Timeout de comunicação
+  if (boardLastUpdateMillis[idx] > 0) {
+    unsigned long timeSinceUpdate = millis() - boardLastUpdateMillis[idx];
+    if (timeSinceUpdate > COMM_TIMEOUT_MS) {
+      status += "X"; // Timeout
+    }
+  }
+  
+  // Valores fora do range
+  if (board.voltage <= VOLTAGE_MIN || board.voltage > VOLTAGE_MAX) {
+    status += "V"; // Voltage problem
+  }
+  
+  if (board.temperature < TEMP_MIN || board.temperature > TEMP_MAX) {
+    status += "T"; // Temperature problem
+  }
+  
+  return status.length() > 0 ? String(slaveId) + ":" + status : "";
+}
+
+
+bool hasAnySystemProblem() {
+  for (int i = 1; i <= TOTAL_SLAVES; i++) {
+    String status = getSlaveStatus(i);
+    if (status.length() > 0) {
+      return true; // Encontrou pelo menos um problema
+    }
+  }
+  return false; // Sistema OK
+}
+
+
+void updateAlarmLed() {
+  static bool alarmLedState = false;
+  static unsigned long lastAlarmBlink = 0;
+  
+  if (hasAnySystemProblem()) {
+    // Pisca LED vermelho a cada 1 segundo
+    if (millis() - lastAlarmBlink >= 1000) {
+      alarmLedState = !alarmLedState;
+      digitalWrite(LED::red, alarmLedState ? HIGH : LOW);
+      lastAlarmBlink = millis();
+    }
+  } else {
+    // Sistema OK - LED vermelho apagado
+    digitalWrite(LED::red, LOW);
+    alarmLedState = false;
+  }
+}

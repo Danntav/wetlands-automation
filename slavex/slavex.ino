@@ -6,13 +6,11 @@
 #include <ADS1115_WE.h>
 #include <Wire.h>
 #include "LedAnimations.h"
-#include "esp_task_wdt.h"
 
-
-#define ACK_TIMEOUT_MS 2000
-#define MAX_RETRIES 3     //@@implementation for resend payload after ACK NOK
+#define ACK_TIMEOUT_MS (5UL * 1000UL)
+#define MAX_RETRIES 3     //resend payload after ACK NOK
 #define I2C_ADDRESS 0x48  // ADS1115
-#define NODE_ID 8   //unique for each Slave[x]
+#define NODE_ID 2   //unique for each Slave[x]
 
 // Master's MAC
 uint8_t masterMacAddress[] = {0x3C, 0x8A, 0x1F, 0x5E, 0x16, 0x48};
@@ -39,7 +37,10 @@ namespace TMP {
   bool tmp_found = false;
 }
 
+// Variáveis de controle para ACK
 volatile bool ackReceived = false;
+volatile int ackId = -1;
+unsigned long lastSendTime = 0;
 
 // Create a struct_message called myData
 struct_message myData;
@@ -65,14 +66,11 @@ void setup() {
   setupESPNow();
   ledTurnOff();
   initSensors();
-  esp_task_wdt_init(60);
-  esp_task_wdt_add(NULL);
 }
 
 
 void loop() { 
   // O loop agora só precisa cuidar de tarefas secundárias, como as animações de LED
-  esp_task_wdt_reset();
   ledUpdateBlinking();
   ledUpdateNewData();
   delay(10);
@@ -128,62 +126,177 @@ void collectAndSendData() {
   sendPayloadWithRetries();
 }
 
-
-// UPDATED: Callback unificado para receber tanto solicitações quanto ACKs - new signature
 void onDataRecv(const esp_now_recv_info *recv_info, const uint8_t *incomingData, int len) {
-  // Se o tamanho dos dados for o de um ACK, trate como um ACK
-  if (len == sizeof(ack_message)) {
-    ack_message ack;
-    memcpy(&ack, incomingData, sizeof(ack));
-    if (ack.id == NODE_ID && ack.ok) {
-      ackReceived = true;
-    }
-  }
-  // Se o tamanho for o de uma solicitação, inicie a coleta
-  else if (len == sizeof(struct_request)) {
+  // O único trabalho é receber o comando e iniciar o envio.
+  if (len == sizeof(struct_request)) {
     struct_request req;
-    memcpy(&req, incomingData, sizeof(req));
+    memcpy(&req, incomingData, sizeof(req)); // [cite: 143]
 
-    // Se o comando for para coletar dados (ex: 1)
-    if (req.command == 1) {
-      Serial.println("Solicitacao do Mestre recebida. Coletando e enviando dados...");
-      collectAndSendData();
+    if (req.command == 1) { // [cite: 123]
+      Serial.println("\n>>> COMANDO RECEBIDO! Coletando e enviando dados...");
+      myData.id = NODE_ID;
+      myData.voltage = getVoltage();
+      myData.temperature = getTemperature(); // [cite: 145]
+
+      // Apenas envia. A confirmação virá no callback OnDataSent.
+      esp_now_send(masterMacAddress, (uint8_t *)&myData, sizeof(myData)); // [cite: 148]
     }
   }
 }
 
-// Função de envio com lógica de reenvio
+/*
+// UPDATED: Callback unificado para receber tanto solicitações quanto ACKs - new signature
+void onDataRecv(const esp_now_recv_info *recv_info, const uint8_t *incomingData, int len) {
+  // ACK recebido
+  if (len == sizeof(ack_message)) {
+    ack_message ack;
+    memcpy(&ack, incomingData, sizeof(ack));
+    
+    if (ack.id == NODE_ID && ack.ok) {
+      ackReceived = true;
+      Serial.printf("✓ ACK OK recebido! (ID=%d)\n", ack.id);
+    }
+    return;
+  }
+  
+  // Comando do Master
+  if (len == sizeof(struct_request)) {
+    struct_request req;
+    memcpy(&req, incomingData, sizeof(req));
+    
+    if (req.command == 1) {
+      Serial.println("\n>>> COMANDO RECEBIDO! Enviando dados...");
+      
+      // Coleta dados imediatamente
+      myData.id = NODE_ID;
+      myData.voltage = getVoltage();
+      myData.temperature = getTemperature();
+      
+      Serial.printf("Dados: ID=%d, V=%.2f, T=%.2f\n", myData.id, myData.voltage, myData.temperature);
+      
+      // Envia com retry simples
+      sendDataSimple();
+    }
+  }
+}
+
+*/
+
+void sendDataSimple() {
+  for (int i = 1; i <= MAX_RETRIES; i++) {
+    Serial.printf("\n--- Envio %d/%d ---\n", i, MAX_RETRIES);
+    
+    ackReceived = false;
+    
+    // Envia dados
+    esp_err_t result = esp_now_send(masterMacAddress, (uint8_t *)&myData, sizeof(myData));
+    
+    if (result != ESP_OK) {
+      Serial.printf("✗ Erro esp_now_send: %d\n", result);
+      delay(1000);
+      continue;
+    }
+    
+    Serial.println("Pacote enviado, aguardando ACK...");
+    
+    // Espera ACK
+    unsigned long start = millis();
+    while (!ackReceived && (millis() - start) < ACK_TIMEOUT_MS) {
+      delay(100);
+      yield();
+    }
+    
+    if (ackReceived) {
+      Serial.println("✓ SUCESSO! Comunicação OK!");
+      ledAnimationBlinking(LED::green, 3);
+      return;
+    } else {
+      Serial.printf("✗ Timeout após %lu ms\n", millis() - start);
+      ledAnimationBlinking(LED::red, 1);
+      
+      if (i < MAX_RETRIES) {
+        delay(500); // Pausa entre tentativas
+      }
+    }
+  }
+  
+  Serial.println("✗ FALHOU após todas as tentativas!");
+  ledAnimationBlinking(LED::red, 5);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 void sendPayloadWithRetries() {
   bool success = false;
 
-  for (int i = 0; i < MAX_RETRIES; i++) {
+  for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    Serial.printf("\n--- Tentativa %d de %d ---\n", attempt, MAX_RETRIES);
+    
+    // Reset das variáveis de controle
     ackReceived = false;
-    esp_now_send(masterMacAddress, (uint8_t *)&myData, sizeof(myData));
-
-    unsigned long start = millis();
-    while (!ackReceived && millis() - start < ACK_TIMEOUT_MS) {
-      // Aguarda o callback setar ackReceived = true
-      ledNewData();
-      ledUpdateNewData();
-      delay(20);
+    ackId = -1;
+    lastSendTime = millis();
+    
+    // Envio do payload
+    esp_err_t result = esp_now_send(masterMacAddress, (uint8_t *)&myData, sizeof(myData));
+    
+    if (result != ESP_OK) {
+      Serial.printf("ERRO no esp_now_send: %d\n", result);
+      delay(500);
+      continue;
     }
-
-    if (ackReceived) {
-      Serial.println("ACK OK recebido do mestre!");
+    
+    Serial.println("Payload enviado, aguardando ACK...");
+    
+    // Aguarda ACK com timeout
+    unsigned long startWait = millis();
+    while (!ackReceived && (millis() - startWait) < ACK_TIMEOUT_MS) {
+      delay(50); // Pequeno delay para não sobrecarregar
+      yield(); // Permite que outras tarefas executem
+    }
+    
+    if (ackReceived && ackId == NODE_ID) {
+      Serial.println("✓ SUCESSO! ACK recebido do Master!");
       ledAnimationBlinking(LED::green, 5);
       success = true;
-      break; // Sai do loop se o ACK foi recebido
+      break;
     } else {
-      Serial.printf("ACK NOK (timeout). Tentativa %d de %d...\n", i + 1, MAX_RETRIES);
-      ledAnimationBlinking(LED::red, 1);
+      unsigned long waitTime = millis() - startWait;
+      Serial.printf("✗ ACK não recebido (timeout após %lu ms)\n", waitTime);
+      Serial.printf("   ackReceived=%s, ackId=%d, esperado=%d\n", 
+                    ackReceived ? "true" : "false", ackId, NODE_ID);
+      
+      ledAnimationBlinking(LED::red, 2);
+      
+      if (attempt < MAX_RETRIES) {
+        Serial.println("Aguardando antes da próxima tentativa...");
+        delay(1000); // Delay entre tentativas
+      }
     }
   }
 
   if (!success) {
-    Serial.println("------------------------------------");
-    Serial.println("FALHA AO ENVIAR DADOS APOS 3 TENTATIVAS.");
-    Serial.println("------------------------------------");
-    ledAnimationBlinking(LED::red, 10);
+    Serial.println("\n==========================================");
+    Serial.printf("FALHA CRÍTICA: Não foi possível enviar dados após %d tentativas\n", MAX_RETRIES);
+    Serial.println("Possíveis causas:");
+    Serial.println("- Master não está funcionando");
+    Serial.println("- Problemas de conectividade ESP-NOW");
+    Serial.println("- Incompatibilidade de estruturas de dados");
+    Serial.println("==========================================");
+    ledAnimationBlinking(LED::red, 20);
   }
 }
 

@@ -39,5 +39,7 @@ bool beginDisplayOperation();
 void endDisplayOperation();
 String getTimeElapsed(int boardIndex);
 void drawAlarmList();
+void updateAlarmMenuLine();
+String getSlaveStatus(int slaveId);
 
 #endif
