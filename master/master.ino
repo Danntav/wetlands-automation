@@ -16,6 +16,13 @@
 String boardLastUpdate[TOTAL_SLAVES];
 unsigned long boardLastUpdateMillis[TOTAL_SLAVES];
 
+// Buffer para armazenar os dados recebidos antes de gravar no SD
+struct_message dataBuffer[TOTAL_SLAVES];
+int bufferCount = 0;
+// Flag para controlar o ciclo de gravação
+bool isCollectionCycleActive = false;
+unsigned long requestCycleStartTime = 0;
+
 String alarmMsgs[MAX_ALARMS];
 int alarmCount = 0;
 bool hasActiveAlarms = false;
@@ -90,17 +97,18 @@ bool sdInitialized = false;
 void setup() {
   pinMode(2, OUTPUT);
   digitalWrite(2, LOW);
-  
   Serial.begin(115200);
   delay(1500);
 
   ledTurnOff();
   setupLeds();
-  //setupDisplay();
+  setupDisplay();
   delay(1500);
 
   setupRTC();
   delay(1000);
+
+  setupSD();
 
   for (int i = 0; i < TOTAL_SLAVES; i++) {
     boards[i].id = NODE_ID_UNKNOWN;
@@ -123,18 +131,26 @@ void setup() {
 }
 
 void loop() {
-  //handleJoystick();
+  handleJoystick();
   ledUpdateNewData();
   ledUpdateBlinking();
   updateAlarmLed();
-  //animateTitle();
+  animateTitle();
   checkCommunicationAlarms();
 
-  // Lógica principal de tempo para solicitar dados
-  static unsigned long lastCollectionTime = 0;
-  if (millis() - lastCollectionTime >= COLLECTION_INTERVAL_MS) {
-    lastCollectionTime = millis();
+  // Lógica principal de tempo para SOLICITAR dados
+  if (!isCollectionCycleActive && (millis() - requestCycleStartTime >= COLLECTION_INTERVAL_MS)) {
     requestDataFromSlaves();
+    requestCycleStartTime = millis(); // Marca o início do ciclo de coleta
+    isCollectionCycleActive = true;
+    Serial.println("Ciclo de coleta iniciado. Aguardando respostas...");
+  }
+
+  // Lógica para GRAVAR os dados após um tempo de espera
+  if (isCollectionCycleActive && (millis() - requestCycleStartTime > 15000)) { // Ex: espera 10s
+    writeBufferToSD();
+    bufferCount = 0;
+    isCollectionCycleActive = false; // Prepara para o próximo ciclo
   }
 }
 
@@ -219,6 +235,59 @@ void setupJoy() {
 }
 
 
+void setupSD() {
+  Serial.println("Initializing SD card...");
+  
+  // Garante que outros dispositivos SPI estão desativados
+  digitalWrite(TFT_CS, HIGH);
+  delay(500);
+  digitalWrite(SD_CS, HIGH);
+  delay(500);
+  
+  // Inicia SPI com os pinos corretos para o SD
+  SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+  delay(50);
+  
+  Serial.print("Testing SD card on CS pin: ");
+  Serial.println(SD_CS);
+
+  if (!SD.begin(SD_CS)) {
+    Serial.println("SD Card initialization FAILED!");
+    logErrorDisplay("SD Card failed!");
+    sdInitialized = false;
+    
+    // Tenta listar arquivos para diagnóstico
+    Serial.println("Attempting to list files on SD card...");
+    File root = SD.open("/");
+    if (root) {
+      root.rewindDirectory();
+      Serial.println("SD card content:");
+      while (true) {
+        File entry = root.openNextFile();
+        if (!entry) break;
+        Serial.print("  ");
+        Serial.println(entry.name());
+        entry.close();
+      }
+      root.close();
+    }
+  } else {
+    Serial.println("SD Card initialized successfully.");
+    sdInitialized = true;
+    
+    // Verifica se o arquivo existe, se não, cria cabeçalho
+    if (!SD.exists(SD_FILE)) {
+      File sdFile = SD.open(SD_FILE, FILE_WRITE);
+      if (sdFile) {
+        sdFile.println("Timestamp,BoardID,Voltage,Temperature");
+        sdFile.close();
+        Serial.println("Created new data file with header");
+      }
+    }
+    Serial.println("SD card is ready for writing.");
+  }
+  SPI.end();
+}
 
 
 void requestDataFromSlaves() {
@@ -249,28 +318,28 @@ void requestDataFromSlaves() {
 
 void onDataRecv(const esp_now_recv_info *info, const uint8_t *data, int len) {
   Serial.println("\n=== PACOTE RECEBIDO ===");
-  
-  // Verificações básicas
-  if (!info || !data || len != sizeof(struct_message)) {
-    Serial.printf("✗ Pacote inválido (len=%d, esperado=%d)\n", len, sizeof(struct_message));
-    return;
-  }
-  
+
+  // Validações rápidas
+  if (len != sizeof(struct_message)) return;
   struct_message msg;
   memcpy(&msg, data, sizeof(msg));
-  
-  // Verifica ID válido
-  if (msg.id <= 0 || msg.id > TOTAL_SLAVES) {
-    Serial.printf("✗ ID inválido: %d\n", msg.id);
+  if (msg.id <= 0 || msg.id > TOTAL_SLAVES) return;
+
+  // Filtro para evitar processamento duplicado
+  int idx = msg.id - 1;
+  if (idx < 0 || idx >= TOTAL_SLAVES) return;
+  static unsigned long lastProcessTime[TOTAL_SLAVES] = {0};
+  if (millis() - lastProcessTime[idx] < 1000) { // Ignora se já processou há menos de 1s
+    Serial.printf("Ignorando mensagem duplicada do Slave %d\n", msg.id);
     return;
   }
+  lastProcessTime[idx] = millis();
   
-  int idx = msg.id - 1;
-  
-  Serial.printf("✓ Dados recebidos do Slave %d:\n", msg.id);
-  Serial.printf("  Voltagem: %.2fV\n", msg.voltage);
-  Serial.printf("  Temperatura: %.2f°C\n", msg.temperature);
-  
+  // Envia o ACK imediatamente
+  ack_message ack = { .id = msg.id, .ok = true };
+  esp_now_send(info->src_addr, (uint8_t *)&ack, sizeof(ack));
+  Serial.println("Enviando ACK...");
+    
   // Atualiza dados (SEM duplicata por agora)
   boards[idx] = msg;
   boardLastUpdate[idx] = getTimestamp();
@@ -279,92 +348,22 @@ void onDataRecv(const esp_now_recv_info *info, const uint8_t *data, int len) {
   // Verifica alarmes
   checkForAlarms(msg, idx);
   
-  // ENVIA ACK IMEDIATAMENTE
-  Serial.println("Enviando ACK...");
-  
-  ack_message ack;
-  ack.id = msg.id;
-  ack.ok = true;
-  
-  esp_err_t result = esp_now_send(info->src_addr, (uint8_t *)&ack, sizeof(ack));
-  
-  if (result == ESP_OK) {
-    Serial.printf("✓ ACK enviado para Slave %d\n", msg.id);
-  } else {
-    Serial.printf("✗ ERRO ao enviar ACK: %d\n", result);
-  }
-  
   Serial.println("======================");
+
+  // Adiciona a mensagem ao buffer se houver espaço
+  if (bufferCount < TOTAL_SLAVES) {
+    dataBuffer[bufferCount] = msg;
+    bufferCount++;
+    ledNewData(); // Pisca o LED para feedback visual
+  }
+  // Esta parte é ótima para depuração e não atrapalha, pois o ACK já foi enviado.
+  Serial.printf("\n=== PACOTE RECEBIDO (Slave %d) ===\n", msg.id);
+  Serial.printf("  Voltagem: %.2fV\n", msg.voltage);
+  Serial.printf("  Temperatura: %.2f°C\n", msg.temperature);
+  Serial.println("  -> ACK enviado, dados atualizados e adicionados ao buffer de gravação.");
+  Serial.println("==================================");
 }
 
-
-
-
-/*
-void onDataRecv(const esp_now_recv_info *info, const uint8_t *data, int len) {
-  // Payload extract
-  ledNewData();
-  if (len != sizeof(struct_message)) return;  // sanity check
-  struct_message msg;
-  memcpy(&msg, data, sizeof(msg));
-
-  // Identifies slave by ID
-  int idx = msg.id - 1;
-  if (idx < 0 || idx >= TOTAL_SLAVES) return;
-
-  static unsigned long lastProcessTime[TOTAL_SLAVES] = {0};
-  if (millis() - lastProcessTime[idx] < 1000) { // Ignora se já processou há menos de 1s
-    Serial.printf("Ignorando mensagem duplicada do Slave %d\n", msg.id);
-    return;
-  }
-  lastProcessTime[idx] = millis();
-
-  boards[idx] = msg;
-  //Register timestamp upon packet received
-  DateTime now = rtc.now();
-  boardLastUpdate[idx] = getTimestamp();
-  boardLastUpdateMillis[idx] = millis();
-
-  //Verificação de alarmes
-  checkForAlarms(msg, idx);
-
-  // Save msg on SD
-  logToSD(msg);
-
-  // Debug
-  int slaveId = findSlaveIndex(info->src_addr);
-  char macStr[18];
-  if (slaveId >= 0) {
-    snprintf(macStr, sizeof(macStr), "Slave %d", slaveId + 1);
-  } else {
-    strcpy(macStr, "Unknown");
-  }
-
-  Serial.printf("Received from %s (MAC %02X:%02X:%02X:%02X:%02X:%02X) "
-                "→ ID=%d, V=%.2fV, T=%.2f°C\n",
-                macStr,
-                info->src_addr[0], info->src_addr[1], info->src_addr[2],
-                info->src_addr[3], info->src_addr[4], info->src_addr[5],
-                msg.id, msg.voltage, msg.temperature);
-
-      // Send ACK back
-  ledNewData();
-  ack_message ack = { .id = msg.id, .ok = true };
-  esp_err_t result = esp_now_send(info->src_addr, (uint8_t *)&ack, sizeof(ack));
-
-
-  if (result == ESP_OK) {
-    Serial.printf("    --> ACK de confirmacao enviado para %s (ID=%d)\n", macStr, msg.id);
-  } else {
-    char errorMsgACK[32];
-    snprintf(errorMsgACK, sizeof(errorMsgACK), "ERROR send ACK S%d", msg.id);
-    Serial.printf(errorMsgACK);
-    logErrorDisplay(errorMsgACK);
-    ledAnimationBlinking(LED::red, 20);
-    addAlarm("Falha ACK Board " + String(msg.id));
-  }
-}
-*/
 
 int findSlaveIndex(const uint8_t *mac) {
   for (int i = 0; i < TOTAL_SLAVES; i++) {
@@ -379,15 +378,19 @@ void logToSD(const struct_message &msg) {
   if (sdError) return; // Se já falhou, não tenta mais até reset
   
   digitalWrite(TFT_CS, HIGH);
+  delay(500);
   digitalWrite(SD_CS, HIGH);
+  delay(500);
   SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
   delay(100); // Reduzido de 200ms
   digitalWrite(SD_CS, LOW);
+  delay(500);
   
   if (!SD.begin(SD_CS)) {
     Serial.println("SD failed - disabling until reset");
     sdError = true;
     digitalWrite(SD_CS, HIGH);
+    delay(500);
     SPI.end();
     return;
   }
@@ -397,6 +400,7 @@ void logToSD(const struct_message &msg) {
     Serial.println("SD file failed - disabling until reset");
     sdError = true;
     digitalWrite(SD_CS, HIGH);
+    delay(500);
     SPI.end();
     return;
   }
@@ -406,6 +410,7 @@ void logToSD(const struct_message &msg) {
   sdFile.close();
   
   digitalWrite(SD_CS, HIGH);
+  delay(500);
   SPI.end();
 }
 
@@ -508,9 +513,7 @@ void addAlarm(String message) {
   
   hasActiveAlarms = true;
   Serial.println("ALARME: " + message);
-  
-  // Ativa LED vermelho piscando
-  //ledAnimationBlinking(LED::red, 50); // 50 piscadas para alarme
+
 }
 
 // Função para limpar alarmes
@@ -621,4 +624,85 @@ void updateAlarmLed() {
     digitalWrite(LED::red, LOW);
     alarmLedState = false;
   }
+}
+
+void writeBufferToSD() {
+  if (bufferCount == 0) {
+    Serial.println("Buffer vazio, nada para gravar no SD.");
+    return;
+  }
+
+  if (!sdInitialized) {
+    Serial.println("SD card not initialized, attempting to reinitialize...");
+    setupSD();
+    if (!sdInitialized) {
+      Serial.println("SD card still not available. Skipping write.");
+      return;
+    }
+  }
+
+  Serial.printf("Iniciando gravação de %d registros no SD Card...\n", bufferCount);
+  
+  // Configura SPI para SD
+  digitalWrite(TFT_CS, HIGH); // Desativa display
+  delay(500);
+  SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
+  delay(10);
+  digitalWrite(SD_CS, LOW);
+  delay(500);
+  if (!SD.begin(SD_CS)) {
+    Serial.println("SD failed during write operation");
+    sdInitialized = false;
+    digitalWrite(SD_CS, HIGH);
+    delay(500);
+    SPI.end();
+    return;
+  }
+  
+  File sdFile = SD.open(SD_FILE, FILE_APPEND);
+  if (!sdFile) {
+    Serial.println("Failed to open file for writing");
+    sdInitialized = false;
+    digitalWrite(SD_CS, HIGH);
+    delay(500);
+    SPI.end();
+    return;
+  }
+
+  // Grava todos os dados do buffer
+  for (int i = 0; i < bufferCount; i++) {
+    String timestamp = getTimestamp();
+    String dataLine = timestamp + "," + String(dataBuffer[i].id) + "," + 
+                     String(dataBuffer[i].voltage, 2) + "," + 
+                     String(dataBuffer[i].temperature, 2);
+    
+    sdFile.println(dataLine);
+    Serial.println("Written: " + dataLine);
+  }
+  
+  sdFile.close();
+  Serial.printf("%d registros gravados com sucesso!\n", bufferCount);
+
+  // Limpa o buffer após gravação bem-sucedida
+  bufferCount = 0;
+  
+  // Libera o barramento SPI
+  digitalWrite(SD_CS, HIGH);
+  delay(500);
+  SPI.end();
+  
+  // Reativa o display se necessário
+  setupDisplayForTFT();
+}
+
+void setupDisplayForTFT() {
+  digitalWrite(SD_CS, HIGH);
+  delay(500);
+  digitalWrite(TFT_CS, LOW);
+  delay(500);
+  SPI.begin(SD_SCK, SD_MISO, SD_MOSI, TFT_CS);
+  tft.initR(INITR_BLACKTAB);
+  tft.setRotation(1);
+  digitalWrite(TFT_CS, HIGH);
+  SPI.end();
 }

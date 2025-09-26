@@ -5,8 +5,8 @@
 
 // Pinos do display
 #define TFT_CS  15
-#define TFT_DC  2
-#define TFT_RST 4
+#define TFT_DC  4
+#define TFT_RST 2
 #define TFT_LED 5
 
 // Pinos do SD (VSPI)
@@ -17,9 +17,9 @@
 #define SD_FILE "/test.txt"
 
 // Pinos do joystick
-#define JOY_X_PIN 32
-#define JOY_Y_PIN 33
-#define JOY_BTN_PIN 25
+#define JOY_X_PIN 34
+#define JOY_Y_PIN 35
+#define JOY_BTN_PIN 26
 
 // Menu
 enum MenuState { MENU_MAIN };
