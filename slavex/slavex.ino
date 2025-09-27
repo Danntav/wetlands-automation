@@ -10,7 +10,7 @@
 #define ACK_TIMEOUT_MS (5UL * 1000UL)
 #define MAX_RETRIES 3     //resend payload after ACK NOK
 #define I2C_ADDRESS 0x48  // ADS1115
-#define NODE_ID 2   //unique for each Slave[x]
+#define NODE_ID 9   //unique for each Slave[x]
 
 // Master's MAC
 uint8_t masterMacAddress[] = {0x3C, 0x8A, 0x1F, 0x5E, 0x16, 0x48};
@@ -38,6 +38,7 @@ namespace TMP {
 }
 
 // Variáveis de controle para ACK
+volatile bool dataReadyToSend = false; 
 volatile bool ackReceived = false;
 volatile int ackId = -1;
 unsigned long lastSendTime = 0;
@@ -70,7 +71,10 @@ void setup() {
 
 
 void loop() { 
-  // O loop agora só precisa cuidar de tarefas secundárias, como as animações de LED
+  if (dataReadyToSend){
+    sendDataSimple();
+    dataReadyToSend = false;
+  }
   ledUpdateBlinking();
   ledUpdateNewData();
   delay(10);
@@ -115,37 +119,18 @@ void setupESPNow(){
 
 // UPDATED: callback when data is sent - new signature for ESP32 core v3.x
 void onDataSent(const wifi_tx_info_t *tx_info, esp_now_send_status_t status) {
-  Serial.print("\r\nLast Packet Send Status: ");
+  Serial.print("\rLast Packet Send Status: ");
   Serial.println(status == ESP_NOW_SEND_SUCCESS ? "Delivery Success" : "Delivery FAIL");
 }
 
 
-// NOVO: Função que encapsula a coleta e o envio
+// Função que encapsula a coleta e o envio
 void collectAndSendData() {
   measureSensors();
   sendPayloadWithRetries();
 }
 
-void onDataRecv(const esp_now_recv_info *recv_info, const uint8_t *incomingData, int len) {
-  // O único trabalho é receber o comando e iniciar o envio.
-  if (len == sizeof(struct_request)) {
-    struct_request req;
-    memcpy(&req, incomingData, sizeof(req)); // [cite: 143]
-
-    if (req.command == 1) { // [cite: 123]
-      Serial.println("\n>>> COMANDO RECEBIDO! Coletando e enviando dados...");
-      myData.id = NODE_ID;
-      myData.voltage = getVoltage();
-      myData.temperature = getTemperature(); // [cite: 145]
-
-      // Apenas envia. A confirmação virá no callback OnDataSent.
-      esp_now_send(masterMacAddress, (uint8_t *)&myData, sizeof(myData)); // [cite: 148]
-    }
-  }
-}
-
-/*
-// UPDATED: Callback unificado para receber tanto solicitações quanto ACKs - new signature
+// Callback unificado para receber tanto solicitações quanto ACKs - new signature
 void onDataRecv(const esp_now_recv_info *recv_info, const uint8_t *incomingData, int len) {
   // ACK recebido
   if (len == sizeof(ack_message)) {
@@ -154,7 +139,7 @@ void onDataRecv(const esp_now_recv_info *recv_info, const uint8_t *incomingData,
     
     if (ack.id == NODE_ID && ack.ok) {
       ackReceived = true;
-      Serial.printf("✓ ACK OK recebido! (ID=%d)\n", ack.id);
+      Serial.printf("ACK OK recebido! (ID=%d)\n", ack.id);
     }
     return;
   }
@@ -175,17 +160,16 @@ void onDataRecv(const esp_now_recv_info *recv_info, const uint8_t *incomingData,
       Serial.printf("Dados: ID=%d, V=%.2f, T=%.2f\n", myData.id, myData.voltage, myData.temperature);
       
       // Envia com retry simples
-      sendDataSimple();
+      dataReadyToSend = true;
     }
   }
 }
 
-*/
+
 
 void sendDataSimple() {
   for (int i = 1; i <= MAX_RETRIES; i++) {
     Serial.printf("\n--- Envio %d/%d ---\n", i, MAX_RETRIES);
-    
     ackReceived = false;
     
     // Envia dados
@@ -207,11 +191,11 @@ void sendDataSimple() {
     }
     
     if (ackReceived) {
-      Serial.println("✓ SUCESSO! Comunicação OK!");
+      Serial.println("SUCESSO! Comunicacao OK!");
       ledAnimationBlinking(LED::green, 3);
       return;
     } else {
-      Serial.printf("✗ Timeout após %lu ms\n", millis() - start);
+      Serial.printf("Timeout apos %lu ms\n", millis() - start);
       ledAnimationBlinking(LED::red, 1);
       
       if (i < MAX_RETRIES) {
@@ -220,7 +204,7 @@ void sendDataSimple() {
     }
   }
   
-  Serial.println("✗ FALHOU após todas as tentativas!");
+  Serial.println("FALHOU apos todas as tentativas!");
   ledAnimationBlinking(LED::red, 5);
 }
 
@@ -336,7 +320,7 @@ float getVoltage(){
   float voltage = 0.00;
   const int samples = 5;
   float sum = 0.0;
-  adc.setCompareChannels(ADS1115_COMP_0_GND);
+  adc.setCompareChannels(ADS1115_COMP_0_1);
   for (int i = 0; i < samples; i++){
     sum += adc.getResult_V();
     delay(50);

@@ -9,8 +9,7 @@
 #include "MenuManager.h"
 #include "DataStructures.h"
 
-//#define COLLECTION_INTERVAL_MS (5UL * 60UL * 1000UL)  // 5 min
-#define COLLECTION_INTERVAL_MS (60UL * 1000UL)
+#define COLLECTION_INTERVAL_MS (5UL * 60UL * 1000UL)  // 5 min
 #define NODE_ID_UNKNOWN 0
 
 String boardLastUpdate[TOTAL_SLAVES];
@@ -38,7 +37,7 @@ const uint8_t slaveMacs[TOTAL_SLAVES][6] = {
   { 0x00, 0x4B, 0x12, 0x21, 0xE6, 0x68 },  // Slave 6
   { 0x20, 0x43, 0xA8, 0xE6, 0x0B, 0x30 },  // Slave 7
   { 0x14, 0x33, 0x5C, 0x02, 0xED, 0x6C },  // Slave 8
-  { 0x14, 0x33, 0x5C, 0x02, 0xED, 0xA6 },  // Slave 9
+  { 0x6C, 0xC8, 0x40, 0x33, 0x76, 0x50 },  // Slave 9
 };
 
 // Master's MAC
@@ -95,11 +94,12 @@ bool sdInitialized = false;
 
 
 void setup() {
+
   pinMode(2, OUTPUT);
   digitalWrite(2, LOW);
   Serial.begin(115200);
   delay(1500);
-
+  Serial.println("\n\n--- FIRMWARE V3.0 - CORRECAO SD ---");
   ledTurnOff();
   setupLeds();
   setupDisplay();
@@ -212,7 +212,7 @@ void setupDisplay() {
   pinMode(SD_CS, OUTPUT);
   digitalWrite(TFT_CS, HIGH);
   digitalWrite(SD_CS, HIGH);
-  delay(500);
+  delay(50);
   digitalWrite(TFT_CS, LOW);
   SPI.begin(SD_SCK, SD_MISO, SD_MOSI, TFT_CS);
   Serial.println("Initializing display...");
@@ -240,9 +240,8 @@ void setupSD() {
   
   // Garante que outros dispositivos SPI estão desativados
   digitalWrite(TFT_CS, HIGH);
-  delay(500);
   digitalWrite(SD_CS, HIGH);
-  delay(500);
+  delay(50);
   
   // Inicia SPI com os pinos corretos para o SD
   SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
@@ -303,7 +302,8 @@ void requestDataFromSlaves() {
     esp_err_t result = esp_now_send(slaveMac, (uint8_t *) &req, sizeof(req));
 
     if (result == ESP_OK) {
-      Serial.printf("--> Solicitacao enviada para o Escravo %d\n", i + 1);
+      Serial.printf("Solicitacao enviada para o Escravo \[%d\]\n", i + 1);
+      ledNewData();
     } else {
       char errorMsg[40];
       snprintf(errorMsg, sizeof(errorMsg), "Erro ao solicitar dados do Escravo %d", i + 1);
@@ -317,8 +317,8 @@ void requestDataFromSlaves() {
 
 
 void onDataRecv(const esp_now_recv_info *info, const uint8_t *data, int len) {
-  Serial.println("\n=== PACOTE RECEBIDO ===");
-
+  Serial.println("PACOTE RECEBIDO --> Processando mensagem...");
+  ledNewData();
   // Validações rápidas
   if (len != sizeof(struct_message)) return;
   struct_message msg;
@@ -347,8 +347,6 @@ void onDataRecv(const esp_now_recv_info *info, const uint8_t *data, int len) {
   
   // Verifica alarmes
   checkForAlarms(msg, idx);
-  
-  Serial.println("======================");
 
   // Adiciona a mensagem ao buffer se houver espaço
   if (bufferCount < TOTAL_SLAVES) {
@@ -360,7 +358,7 @@ void onDataRecv(const esp_now_recv_info *info, const uint8_t *data, int len) {
   Serial.printf("\n=== PACOTE RECEBIDO (Slave %d) ===\n", msg.id);
   Serial.printf("  Voltagem: %.2fV\n", msg.voltage);
   Serial.printf("  Temperatura: %.2f°C\n", msg.temperature);
-  Serial.println("  -> ACK enviado, dados atualizados e adicionados ao buffer de gravação.");
+  Serial.println("  -> ACK enviado, dados atualizados e adicionados ao buffer de gravacaoo.");
   Serial.println("==================================");
 }
 
@@ -378,19 +376,17 @@ void logToSD(const struct_message &msg) {
   if (sdError) return; // Se já falhou, não tenta mais até reset
   
   digitalWrite(TFT_CS, HIGH);
-  delay(500);
   digitalWrite(SD_CS, HIGH);
-  delay(500);
+  delay(50);
   SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
-  delay(100); // Reduzido de 200ms
+  delay(100);
   digitalWrite(SD_CS, LOW);
-  delay(500);
+  delay(50);
   
   if (!SD.begin(SD_CS)) {
     Serial.println("SD failed - disabling until reset");
     sdError = true;
-    digitalWrite(SD_CS, HIGH);
-    delay(500);
+    digitalWrite(SD_CS, HIGH); 
     SPI.end();
     return;
   }
@@ -400,7 +396,6 @@ void logToSD(const struct_message &msg) {
     Serial.println("SD file failed - disabling until reset");
     sdError = true;
     digitalWrite(SD_CS, HIGH);
-    delay(500);
     SPI.end();
     return;
   }
@@ -410,7 +405,6 @@ void logToSD(const struct_message &msg) {
   sdFile.close();
   
   digitalWrite(SD_CS, HIGH);
-  delay(500);
   SPI.end();
 }
 
@@ -423,8 +417,8 @@ String getTimestamp() {
   }
   DateTime now = rtc.now();
   char buf[20];
-  snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d:%02d",
-           now.year(), now.month(), now.day(),
+  snprintf(buf, sizeof(buf), "%02d-%02d-%04d %02d:%02d:%02d",
+           now.day(), now.month(), now.year(),
            now.hour(), now.minute(), now.second());
   return String(buf);
 }
@@ -510,10 +504,8 @@ void addAlarm(String message) {
     }
     alarmMsgs[MAX_ALARMS - 1] = fullAlarmMsg;
   }
-  
   hasActiveAlarms = true;
   Serial.println("ALARME: " + message);
-
 }
 
 // Função para limpar alarmes
@@ -632,39 +624,28 @@ void writeBufferToSD() {
     return;
   }
 
-  if (!sdInitialized) {
-    Serial.println("SD card not initialized, attempting to reinitialize...");
-    setupSD();
-    if (!sdInitialized) {
-      Serial.println("SD card still not available. Skipping write.");
-      return;
-    }
-  }
-
-  Serial.printf("Iniciando gravação de %d registros no SD Card...\n", bufferCount);
-  
-  // Configura SPI para SD
-  digitalWrite(TFT_CS, HIGH); // Desativa display
-  delay(500);
+  digitalWrite(TFT_CS, HIGH); // Garante que o display está desativado
   SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
-  delay(10);
-  digitalWrite(SD_CS, LOW);
-  delay(500);
+  digitalWrite(SD_CS, LOW);  // Ativa o pino de Chip Select do SD Card
+  delay(10); // Pequena pausa para estabilizar
+
   if (!SD.begin(SD_CS)) {
-    Serial.println("SD failed during write operation");
+    Serial.println("FALHA: Nao foi possivel inicializar o SD Card na operacao de escrita.");
     sdInitialized = false;
+    // Limpa e sai, liberando o barramento
     digitalWrite(SD_CS, HIGH);
-    delay(500);
     SPI.end();
     return;
   }
+  sdInitialized = true; // Se chegou aqui, a inicialização funcionou.
   
   File sdFile = SD.open(SD_FILE, FILE_APPEND);
+  //File sdFile = SD.open("/testfile.txt", FILE_APPEND);
   if (!sdFile) {
     Serial.println("Failed to open file for writing");
-    sdInitialized = false;
+    logErrorDisplay("Failed open SD file");
+    //sdInitialized = false;
     digitalWrite(SD_CS, HIGH);
-    delay(500);
     SPI.end();
     return;
   }
@@ -683,12 +664,18 @@ void writeBufferToSD() {
   sdFile.close();
   Serial.printf("%d registros gravados com sucesso!\n", bufferCount);
 
+  for(int i=0; i<10; i++){
+    digitalWrite(LED::green, HIGH);
+    delay(80);
+    digitalWrite(LED::green, LOW);
+    delay(80);
+  }
+
   // Limpa o buffer após gravação bem-sucedida
   bufferCount = 0;
   
   // Libera o barramento SPI
   digitalWrite(SD_CS, HIGH);
-  delay(500);
   SPI.end();
   
   // Reativa o display se necessário
@@ -697,9 +684,8 @@ void writeBufferToSD() {
 
 void setupDisplayForTFT() {
   digitalWrite(SD_CS, HIGH);
-  delay(500);
   digitalWrite(TFT_CS, LOW);
-  delay(500);
+  delay(50);
   SPI.begin(SD_SCK, SD_MISO, SD_MOSI, TFT_CS);
   tft.initR(INITR_BLACKTAB);
   tft.setRotation(1);

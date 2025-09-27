@@ -8,54 +8,78 @@ RTC_DS1307 rtc;
 
 void setup() {
   Serial.begin(115200);
-  delay(1000); // Aguardar inicialização do serial
+  delay(2000); // Aguardar inicialização do serial
 
-  Serial.println("Iniciando teste RTC...");
+  Serial.println("Iniciando ajuste do RTC...");
+  
+  // Inicializar I2C com os pinos específicos
   Wire.begin(RTC_SDA, RTC_SCL);
-  scanI2C(); // Verificar dispositivos no barramento I2C
+  delay(100);
 
+  // Verificar se o RTC está conectado
   if (!rtc.begin()) {
-    Serial.println("ERROR: RTC not found!");
-    return;
+    Serial.println("ERRO CRÍTICO: RTC não encontrado! Verifique a fiação.");
+    Serial.println("Verificando dispositivos I2C...");
+    scanI2C();
+    while(1); // Trava aqui se não encontrar o RTC
   }
-  if (!rtc.isrunning()) {
-    Serial.println("ERROR: RTC not running");
-    rtc.adjust(DateTime(2025, 7, 17, 20, 31, 0)); // Ajustar para data inicial
-    Serial.println("RTC adjusted to 2025-07-17 20:31:00");
-  } else {
-    Serial.println("RTC successfully initialized.");
-  }
+
+  Serial.println("RTC encontrado!");
+
+  // Forçar o ajuste do RTC (descomente apenas quando quiser ajustar)
+  // IMPORTANTE: Comente esta linha após o primeiro ajuste para evitar reajustes desnecessários
+  rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+  Serial.println("RTC ajustado para a hora de compilação.");
+  
+  // Alternativa: ajustar manualmente para uma data/hora específica
+  // rtc.adjust(DateTime(2025, 9, 27, 14, 30, 0)); // Ano, Mês, Dia, Hora, Minuto, Segundo
+  
+  Serial.println("------------------------------------");
+  Serial.println("RTC ajustado com sucesso!");
+  Serial.println("A hora atual é:");
+  Serial.println("------------------------------------");
 }
 
 void loop() {
-  if (rtc.isrunning()) {
-    String timestamp = getTimestamp();
-    Serial.println("Timestamp: " + timestamp);
-  } else {
-    Serial.println("ERROR: RTC not running");
-  }
-  delay(1000); // Exibir a cada 1 segundo
-}
-
-String getTimestamp() {
+  // Verificar se o RTC está funcionando
   if (!rtc.isrunning()) {
-    Serial.println("ERROR: RTC not running");
-    return "1970-01-01 00:00:00";
+    Serial.println("ERRO: RTC parou de funcionar!");
+    delay(5000);
+    return;
   }
+
   DateTime now = rtc.now();
-  char buf[20];
-  snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d:%02d",
-           now.year(), now.month(), now.day(),
-           now.hour(), now.minute(), now.second());
-  return String(buf);
+  
+  // Usar formatação manual ao invés de toString() para evitar problemas de memória
+  Serial.printf("%04d-%02d-%02d %02d:%02d:%02d\n", 
+                now.year(), now.month(), now.day(),
+                now.hour(), now.minute(), now.second());
+  
+  delay(2000);
 }
 
 void scanI2C() {
-  Serial.println("Scanning I2C bus...");
-  for (byte addr = 1; addr < 127; addr++) {
-    Wire.beginTransmission(addr);
-    if (Wire.endTransmission() == 0) {
-      Serial.printf("Device found at address 0x%02X\n", addr);
+  Serial.println("Escaneando barramento I2C...");
+  int dispositivos = 0;
+  
+  for (byte endereco = 1; endereco < 127; endereco++) {
+    Wire.beginTransmission(endereco);
+    byte erro = Wire.endTransmission();
+    
+    if (erro == 0) {
+      Serial.printf("Dispositivo encontrado no endereço 0x%02X\n", endereco);
+      dispositivos++;
     }
+  }
+  
+  if (dispositivos == 0) {
+    Serial.println("Nenhum dispositivo I2C encontrado!");
+    Serial.println("Verifique as conexões:");
+    Serial.println("- VCC do RTC -> 5V ou 3.3V");
+    Serial.println("- GND do RTC -> GND");
+    Serial.println("- SDA do RTC -> Pino 21");
+    Serial.println("- SCL do RTC -> Pino 22");
+  } else {
+    Serial.printf("Total de dispositivos encontrados: %d\n", dispositivos);
   }
 }

@@ -170,11 +170,11 @@ void drawMenu() {
   tft->setCursor(10, 30);
   tft->print("--- MENU ---");
 
-  const char* options[] = { "Board Status", "Last Errors", "Alarmes" };
+  const char* options[] = { "Reatores", "Mestre Confg", "Alarmes" };
   const int count = sizeof(options) / sizeof(options[0]);
 
   for (int i = 0; i < count; i++) {
-    tft->fillRect(5, 60 + i * 20, 150, 16, i == selectedOption ? ST77XX_WHITE : ST77XX_BLACK);
+    tft->fillRect(5, 60 + i * 20, 150, 18, i == selectedOption ? ST77XX_WHITE : ST77XX_BLACK);
 
     if (i == selectedOption) {
       tft->setTextColor(ST77XX_BLACK, ST77XX_WHITE);
@@ -199,13 +199,13 @@ void drawBoardStatus() {
   tft->setTextSize(2);
   tft->setCursor(15, 10);
   if (board.id == 0) {
-    tft->printf("Board %d NOK", currentBoardIndex + 1);
+    tft->printf("REATOR %d NOK", currentBoardIndex + 1);
   } else {
-    tft->printf("Board %d", board.id);
+    tft->printf("REATOR %d", board.id);
   }
   //Timestamp from last packet
   tft->setTextSize(1);
-  tft->setCursor(10, 35);
+  tft->setCursor(10, 45);
   tft->setTextColor(ST77XX_CYAN);
   tft->print("Ultima coleta:");
   
@@ -221,7 +221,6 @@ void drawBoardStatus() {
     tft->print(timeOnly);
     
     // Linha adicional com tempo decorrido
-    tft->setCursor(10, 55);
     tft->setTextColor(ST77XX_YELLOW);
     tft->print("(");
     tft->print(getTimeElapsed(currentBoardIndex));
@@ -229,7 +228,7 @@ void drawBoardStatus() {
   }
 
   tft->setTextSize(1);
-  tft->setCursor(10, 45);
+  tft->setCursor(10, 35);
   tft->setTextColor(ST77XX_CYAN);
   tft->print("TS: ");
   tft->print(getTimestamp());

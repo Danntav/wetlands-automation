@@ -2,7 +2,7 @@
 #include "LedAnimations.h"
 
 static int blinkPin = -1;
-static int blinkTotalBlinks = 0;
+static int blinkTotalBlinks = 3;
 static int blinkCount = 0;
 static bool blinkState = false;
 static unsigned long lastBlinkTime = 0;
@@ -85,7 +85,7 @@ void ledTurnOff(){
 
 void ledNewData() {
   digitalWrite(LED::yellow, HIGH);
-  ledBlinkUntil = millis() + 50;
+  ledBlinkUntil = millis() + 100;
 }
 
 void ledUpdateNewData() {
