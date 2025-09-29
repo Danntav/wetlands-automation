@@ -356,7 +356,7 @@ void onDataRecv(const esp_now_recv_info *info, const uint8_t *data, int len) {
   }
   // Esta parte é ótima para depuração e não atrapalha, pois o ACK já foi enviado.
   Serial.printf("\n=== PACOTE RECEBIDO (Slave %d) ===\n", msg.id);
-  Serial.printf("  Voltagem: %.2fV\n", msg.voltage);
+  Serial.printf("  Voltagem: %.4fV\n", msg.voltage);
   Serial.printf("  Temperatura: %.2f°C\n", msg.temperature);
   Serial.println("  -> ACK enviado, dados atualizados e adicionados ao buffer de gravacaoo.");
   Serial.println("==================================");
@@ -654,7 +654,7 @@ void writeBufferToSD() {
   for (int i = 0; i < bufferCount; i++) {
     String timestamp = getTimestamp();
     String dataLine = timestamp + "," + String(dataBuffer[i].id) + "," + 
-                     String(dataBuffer[i].voltage, 2) + "," + 
+                     String(dataBuffer[i].voltage, 4) + "," + 
                      String(dataBuffer[i].temperature, 2);
     
     sdFile.println(dataLine);

@@ -31,8 +31,8 @@
 #define VOLTAGE_MAX 50
 #define TEMP_MIN 0
 #define TEMP_MAX 80
-//#define COMM_TIMEOUT_MS 10L*60UL*1000UL
-#define COMM_TIMEOUT_MS 60UL*1000UL
+#define COMM_TIMEOUT_MS 6UL*60UL*1000UL
+
 // Structs
 typedef struct struct_message {
   int id;

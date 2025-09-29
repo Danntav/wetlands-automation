@@ -209,20 +209,6 @@ void sendDataSimple() {
 }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 void sendPayloadWithRetries() {
   bool success = false;
 
@@ -291,7 +277,7 @@ void initSensors(){
   if(!adc.init()){
     Serial.println("ERROR ADS1115 not found!");
   }
-  adc.setVoltageRange_mV(ADS1115_RANGE_6144);
+  adc.setVoltageRange_mV(ADS1115_RANGE_1024);
   adc.setMeasureMode(ADS1115_CONTINUOUS);
 
   // Init temp sensor - DS18B20
@@ -327,7 +313,7 @@ float getVoltage(){
   }
   voltage = sum / samples;
   Serial.print("Pin A0: ");
-  Serial.print(voltage, 3);
+  Serial.print(voltage, 4);
   
   return voltage; // alternative: getResult_mV for Millivolt
 }

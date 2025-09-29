@@ -239,7 +239,14 @@ void drawBoardStatus() {
   if (board.id == 0) {
     tft->print("V: --- V");
   } else {
-    tft->printf("V: %.3f V", board.voltage);
+    //tft->printf("V: %.4f V", board.voltage);
+    String voltageString = String(board.voltage, 4); // Converte o float para String com 4 casas decimais
+    if (voltageString.startsWith("0.")) {
+      voltageString = voltageString.substring(1); // Remove o "0" inicial, mantendo o "."
+    }
+    tft->print("V: ");
+    tft->print(voltageString);
+    tft->print("mV");
   }
 
   tft->setCursor(10, 85);
