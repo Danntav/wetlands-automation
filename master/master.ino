@@ -278,7 +278,7 @@ void setupSD() {
     if (!SD.exists(SD_FILE)) {
       File sdFile = SD.open(SD_FILE, FILE_WRITE);
       if (sdFile) {
-        sdFile.println("Timestamp,BoardID,Voltage,Temperature");
+        sdFile.println("Date,Time,BoardID,Voltage,Temperature");
         sdFile.close();
         Serial.println("Created new data file with header");
       }
@@ -581,7 +581,7 @@ String getSlaveStatus(int slaveId) {
     status += "V"; // Voltage problem
   }
   
-  if (board.temperature < TEMP_MIN || board.temperature > TEMP_MAX) {
+  if (board.temperature <= TEMP_MIN || board.temperature > TEMP_MAX) {
     status += "T"; // Temperature problem
   }
   
@@ -653,7 +653,9 @@ void writeBufferToSD() {
   // Grava todos os dados do buffer
   for (int i = 0; i < bufferCount; i++) {
     String timestamp = getTimestamp();
-    String dataLine = timestamp + "," + String(dataBuffer[i].id) + "," + 
+    String date = timestamp.substring(0,10);
+    String time = timestamp.substring(11);
+    String dataLine = date + "," + time + "," + String(dataBuffer[i].id) + "," + 
                      String(dataBuffer[i].voltage, 4) + "," + 
                      String(dataBuffer[i].temperature, 2);
     

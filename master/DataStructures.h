@@ -65,4 +65,4 @@ extern int alarmCount;
 extern bool hasActiveAlarms;
 extern int alarmMenuOption;
 
-#endif // DATA_STRUCTURE_H
+#endif
