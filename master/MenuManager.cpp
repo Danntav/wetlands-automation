@@ -8,8 +8,8 @@ extern struct_message boards[TOTAL_SLAVES];
 extern String getTimestamp();
 extern String errorMsgs[MAX_ERRORS];
 extern int errorCount;
-extern String boardLastUpdate[TOTAL_SLAVES];           // NOVA
-extern unsigned long boardLastUpdateMillis[TOTAL_SLAVES]; // NOVA
+extern String boardLastUpdate[TOTAL_SLAVES];
+extern unsigned long boardLastUpdateMillis[TOTAL_SLAVES];
 extern String alarmMsgs[MAX_ALARMS];
 extern int alarmCount;
 extern bool hasActiveAlarms;
@@ -74,7 +74,7 @@ void updateMenu(bool left, bool right, bool up, bool down, bool click) {
         selectedOption = (selectedOption + 2) % 3;
         drawMenu();
       } else if (down) {
-        selectedOption = (selectedOption + 1) % 3; 
+        selectedOption = (selectedOption + 1) % 3;
         drawMenu();
       }
 
@@ -220,7 +220,7 @@ void drawBoardStatus() {
     String timeOnly = fullTimestamp.substring(11); // Pega só "HH:MM:SS"
     tft->print(timeOnly);
     
-    // Linha adicional com tempo decorrido
+    // Tempo decorrido
     tft->setTextColor(ST77XX_YELLOW);
     tft->print("(");
     tft->print(getTimeElapsed(currentBoardIndex));
@@ -239,7 +239,6 @@ void drawBoardStatus() {
   if (board.id == 0) {
     tft->print("V: --- V");
   } else {
-    //tft->printf("V: %.4f V", board.voltage);
     String voltageString = String(board.voltage, 4); // Converte o float para String com 4 casas decimais
     if (voltageString.startsWith("0.")) {
       voltageString = voltageString.substring(1); // Remove o "0" inicial, mantendo o "."
@@ -279,7 +278,7 @@ void drawErrorList() {
     tft->setCursor(10, y);
     tft->print("Nenhum erro registrado");
   } else {
-    for (int i = 0; i < errorCount && y < 95; i++) { // Mudei para 95 para dar espaço para as opções
+    for (int i = 0; i < errorCount && y < 95; i++) {
       tft->setCursor(10, y);
       tft->print(errorMsgs[i]);
       y += 18;
@@ -405,7 +404,6 @@ void drawAlarmList() {
     tft->print("X=Timeout V=Voltage T=Temp");
   }
   
-  // Opções na parte inferior (mantém a lógica existente)
   tft->setTextSize(1);
   
   if (alarmMenuOption == 0) {

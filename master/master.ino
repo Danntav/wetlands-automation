@@ -84,22 +84,18 @@ int selectedOption = 0;
 int currentBoardIndex = 0;
 struct_message boards[TOTAL_SLAVES];
 
-
 RTC_DS1307 rtc;  //DS1307
 
-// Init ST7735 display
-Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);
+Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST); // Init ST7735 display
 
 bool sdInitialized = false;
 
 
 void setup() {
-
   pinMode(2, OUTPUT);
   digitalWrite(2, LOW);
   Serial.begin(115200);
   delay(1500);
-  Serial.println("\n\n--- FIRMWARE V3.0 - CORRECAO SD ---");
   ledTurnOff();
   setupLeds();
   setupDisplay();
@@ -129,6 +125,7 @@ void setup() {
   delay(1000);
   setupJoy();
 }
+
 
 void loop() {
   handleJoystick();
@@ -196,7 +193,6 @@ void setupRTC() {
     Serial.println("ERROR RTC not running");
     logErrorDisplay("ERROR RTC not running");
     ledAnimationBlinking(LED::red, 20);
-    // Ajustar data/hora inicial (ajuste para a data atual, ex.: 17/07/2025 20:21:00)
     rtc.adjust(DateTime(2025, 7, 19, 16, 30, 0));
   } else {
     Serial.println("RTC successfully initialized");
@@ -313,7 +309,6 @@ void requestDataFromSlaves() {
     delay(300); // Um pequeno intervalo entre as solicitações para não sobrecarregar
   }
 }
-
 
 
 void onDataRecv(const esp_now_recv_info *info, const uint8_t *data, int len) {
@@ -467,13 +462,13 @@ void checkForAlarms(const struct_message &msg, int boardIndex) {
   char alarmMsg[80];
   
   // Verifica voltagem
-  if (msg.voltage < VOLTAGE_MIN || msg.voltage > VOLTAGE_MAX) {
+  if (msg.voltage <= VOLTAGE_MIN || msg.voltage > VOLTAGE_MAX) {
     snprintf(alarmMsg, sizeof(alarmMsg), "Board %d: Voltagem anormal %.2fV", msg.id, msg.voltage);
     addAlarm(String(alarmMsg));
   }
   
   // Verifica temperatura
-  if (msg.temperature < TEMP_MIN || msg.temperature > TEMP_MAX) {
+  if (msg.temperature <= TEMP_MIN || msg.temperature > TEMP_MAX) {
     snprintf(alarmMsg, sizeof(alarmMsg), "Board %d: Temperatura anormal %.1f°C", msg.id, msg.temperature);
     addAlarm(String(alarmMsg));
   }
@@ -485,7 +480,7 @@ void checkForAlarms(const struct_message &msg, int boardIndex) {
   }
 }
 
-// Função para verificar timeouts de comunicação
+// Verifica timeouts de comunicação
 void checkCommunicationAlarms() {
   static unsigned long lastCommCheck = 0;
   if (millis() - lastCommCheck < 60000) return; // Verifica apenas a cada minuto
