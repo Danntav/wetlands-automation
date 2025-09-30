@@ -363,52 +363,6 @@ void onDataRecv(const esp_now_recv_info *info, const uint8_t *data, int len) {
 }
 
 
-int findSlaveIndex(const uint8_t *mac) {
-  for (int i = 0; i < TOTAL_SLAVES; i++) {
-    if (memcmp(mac, slaveMacs[i], 6) == 0) return i;
-  }
-  return -1;
-}
-
-
-void logToSD(const struct_message &msg) {
-  static bool sdError = false;
-  if (sdError) return; // Se já falhou, não tenta mais até reset
-  
-  digitalWrite(TFT_CS, HIGH);
-  digitalWrite(SD_CS, HIGH);
-  delay(50);
-  SPI.begin(SD_SCK, SD_MISO, SD_MOSI, SD_CS);
-  delay(100);
-  digitalWrite(SD_CS, LOW);
-  delay(50);
-  
-  if (!SD.begin(SD_CS)) {
-    Serial.println("SD failed - disabling until reset");
-    sdError = true;
-    digitalWrite(SD_CS, HIGH); 
-    SPI.end();
-    return;
-  }
-  
-  File sdFile = SD.open(SD_FILE, FILE_APPEND);
-  if (!sdFile) {
-    Serial.println("SD file failed - disabling until reset");
-    sdError = true;
-    digitalWrite(SD_CS, HIGH);
-    SPI.end();
-    return;
-  }
-  
-  String timestamp = getTimestamp();
-  sdFile.printf("%s,%d,%.2f,%.2f\n", timestamp.c_str(), msg.id, msg.voltage, msg.temperature);
-  sdFile.close();
-  
-  digitalWrite(SD_CS, HIGH);
-  SPI.end();
-}
-
-
 String getTimestamp() {
   if (!rtc.isrunning()) {
     Serial.println("ERROR RTC not running");
@@ -480,17 +434,7 @@ void handleJoystick() {
   prevJs = js;
 }
 
-// Função auxiliar para converter DateTime para String
-String formatDateTime(DateTime dt) {
-  char buf[20];
-  snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d:%02d",
-           dt.year(), dt.month(), dt.day(),
-           dt.hour(), dt.minute(), dt.second());
-  return String(buf);
-}
 
-
-// Função para adicionar alarme
 void addAlarm(String message) {
   String timestamp = getTimestamp();
   String fullAlarmMsg = timestamp + " " + message;
@@ -508,7 +452,7 @@ void addAlarm(String message) {
   Serial.println("ALARME: " + message);
 }
 
-// Função para limpar alarmes
+
 void clearAlarms() {
   for (int i = 0; i < alarmCount; i++) {
     alarmMsgs[i] = "";
@@ -535,7 +479,7 @@ void checkForAlarms(const struct_message &msg, int boardIndex) {
   }
   
   // Verifica valores inválidos típicos de sensores com problema
-  if (msg.voltage <= 0 || msg.temperature <= -100) {
+  if (msg.voltage <= 0.0 || msg.temperature <= -100) {
     snprintf(alarmMsg, sizeof(alarmMsg), "Board %d: Sensor com falha (V=%.2f T=%.1f)", msg.id, msg.voltage, msg.temperature);
     addAlarm(String(alarmMsg));
   }

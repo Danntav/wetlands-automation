@@ -1,6 +1,5 @@
 #include <WiFi.h>
 #include <esp_now.h>
-#include <driver/rtc_io.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <ADS1115_WE.h>
@@ -40,8 +39,6 @@ namespace TMP {
 // Variáveis de controle para ACK
 volatile bool dataReadyToSend = false; 
 volatile bool ackReceived = false;
-volatile int ackId = -1;
-unsigned long lastSendTime = 0;
 
 // Create a struct_message called myData
 struct_message myData;
@@ -72,7 +69,7 @@ void setup() {
 
 void loop() { 
   if (dataReadyToSend){
-    sendDataSimple();
+    sendData();
     dataReadyToSend = false;
   }
   ledUpdateBlinking();
@@ -124,12 +121,6 @@ void onDataSent(const wifi_tx_info_t *tx_info, esp_now_send_status_t status) {
 }
 
 
-// Função que encapsula a coleta e o envio
-void collectAndSendData() {
-  measureSensors();
-  sendPayloadWithRetries();
-}
-
 // Callback unificado para receber tanto solicitações quanto ACKs - new signature
 void onDataRecv(const esp_now_recv_info *recv_info, const uint8_t *incomingData, int len) {
   // ACK recebido
@@ -166,8 +157,7 @@ void onDataRecv(const esp_now_recv_info *recv_info, const uint8_t *incomingData,
 }
 
 
-
-void sendDataSimple() {
+void sendData() {
   for (int i = 1; i <= MAX_RETRIES; i++) {
     Serial.printf("\n--- Envio %d/%d ---\n", i, MAX_RETRIES);
     ackReceived = false;
@@ -209,68 +199,6 @@ void sendDataSimple() {
 }
 
 
-void sendPayloadWithRetries() {
-  bool success = false;
-
-  for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    Serial.printf("\n--- Tentativa %d de %d ---\n", attempt, MAX_RETRIES);
-    
-    // Reset das variáveis de controle
-    ackReceived = false;
-    ackId = -1;
-    lastSendTime = millis();
-    
-    // Envio do payload
-    esp_err_t result = esp_now_send(masterMacAddress, (uint8_t *)&myData, sizeof(myData));
-    
-    if (result != ESP_OK) {
-      Serial.printf("ERRO no esp_now_send: %d\n", result);
-      delay(500);
-      continue;
-    }
-    
-    Serial.println("Payload enviado, aguardando ACK...");
-    
-    // Aguarda ACK com timeout
-    unsigned long startWait = millis();
-    while (!ackReceived && (millis() - startWait) < ACK_TIMEOUT_MS) {
-      delay(50); // Pequeno delay para não sobrecarregar
-      yield(); // Permite que outras tarefas executem
-    }
-    
-    if (ackReceived && ackId == NODE_ID) {
-      Serial.println("✓ SUCESSO! ACK recebido do Master!");
-      ledAnimationBlinking(LED::green, 5);
-      success = true;
-      break;
-    } else {
-      unsigned long waitTime = millis() - startWait;
-      Serial.printf("✗ ACK não recebido (timeout após %lu ms)\n", waitTime);
-      Serial.printf("   ackReceived=%s, ackId=%d, esperado=%d\n", 
-                    ackReceived ? "true" : "false", ackId, NODE_ID);
-      
-      ledAnimationBlinking(LED::red, 2);
-      
-      if (attempt < MAX_RETRIES) {
-        Serial.println("Aguardando antes da próxima tentativa...");
-        delay(1000); // Delay entre tentativas
-      }
-    }
-  }
-
-  if (!success) {
-    Serial.println("\n==========================================");
-    Serial.printf("FALHA CRÍTICA: Não foi possível enviar dados após %d tentativas\n", MAX_RETRIES);
-    Serial.println("Possíveis causas:");
-    Serial.println("- Master não está funcionando");
-    Serial.println("- Problemas de conectividade ESP-NOW");
-    Serial.println("- Incompatibilidade de estruturas de dados");
-    Serial.println("==========================================");
-    ledAnimationBlinking(LED::red, 20);
-  }
-}
-
-
 void initSensors(){
   // Init voltage adc - ADS1115
   Wire.begin();
@@ -288,16 +216,6 @@ void initSensors(){
     Serial.println("DS18B20 not found at init!");
     TMP::tmp_found = false;
   }
-}
-
-
-void measureSensors(){
-  float voltage = getVoltage();
-  float temperature = getTemperature();
-
-  myData.id = NODE_ID;
-  myData.voltage = voltage;
-  myData.temperature = temperature;
 }
 
 
@@ -340,13 +258,4 @@ float getTemperature(){
   Serial.printf("Temp average: %.2f°C (%d valid readings)\n", average, readings);
   
   return roundf(average * 100.0) / 100.0;
-}
-
-void logStatus() {
-  Serial.println("=== SLAVE STATUS ===");
-  Serial.printf("Node ID: %d\n", NODE_ID);
-  Serial.printf("WiFi Mode: %d\n", WiFi.getMode());
-  Serial.printf("Free Heap: %d\n", ESP.getFreeHeap());
-  Serial.printf("Uptime: %lu ms\n", millis());
-  Serial.println("==================");
 }
