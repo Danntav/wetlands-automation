@@ -9,7 +9,7 @@
 #include "MenuManager.h"
 #include "DataStructures.h"
 
-#define COLLECTION_INTERVAL_MS (5UL * 60UL * 1000UL)  // 5 min
+#define COLLECTION_INTERVAL_MS (30UL * 60UL * 1000UL)
 #define NODE_ID_UNKNOWN 0
 
 String boardLastUpdate[TOTAL_SLAVES];
@@ -144,7 +144,7 @@ void loop() {
   }
 
   // Lógica para GRAVAR os dados após um tempo de espera
-  if (isCollectionCycleActive && (millis() - requestCycleStartTime > 15000)) { // Ex: espera 10s
+  if (isCollectionCycleActive && (millis() - requestCycleStartTime > 20000)) {
     writeBufferToSD();
     bufferCount = 0;
     isCollectionCycleActive = false; // Prepara para o próximo ciclo
